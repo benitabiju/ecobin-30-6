@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+@theme {
+  /* Setup your custom Eco theme colors */
+  --color-eco-lightBg: #F4F7F4;
+  --color-eco-darkBg: #0A120D;
+  --color-eco-forest: #132A13;
+  --color-eco-emerald: #31572C;
+  --color-eco-mint: #4F772D;
+  --color-eco-sage: #90A955;
+  --color-eco-earth: #ECF39E;
+  --color-eco-charcoal: #1C251F;
+
+  /* Setup your custom fonts */
+  --font-display: "Playfair Display", serif;
+  --font-sans: "Plus Jakarta Sans", sans-serif;
+}
