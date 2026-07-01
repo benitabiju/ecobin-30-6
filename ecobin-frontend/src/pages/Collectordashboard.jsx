@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { getAssignedPickups, updatePickupStatus, logCollection } from '../api/collector';
+﻿import React, { useEffect, useState } from 'react';
+import { getAssignedPickups, updatePickupStatus, logCollection } from '../api/Collector';
 
 const STATUS_STYLES = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -37,7 +37,7 @@ function CompletionForm({ pickup, onSubmit, onCancel, submitting }) {
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes (optional — e.g. access issues, contamination)"
+        placeholder="Notes (optional â€” e.g. access issues, contamination)"
         rows="2"
         className="p-2 text-sm bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg"
       />
@@ -89,7 +89,7 @@ export default function CollectorDashboard() {
     try {
       // Log the weight/notes record, then flip status to 'collected'.
       // If your backend auto-sets status when a Collection is created,
-      // the second call is harmless but may be redundant — adjust as needed.
+      // the second call is harmless but may be redundant â€” adjust as needed.
       await logCollection(pickup.request_id, weight, notes);
       await updatePickupStatus(pickup.request_id, 'collected');
       setActiveFormId(null);
@@ -148,7 +148,7 @@ export default function CollectorDashboard() {
                           {pickup.category_detail?.category_name || 'Pickup Request'}
                         </p>
                         <p className="text-sm text-eco-mint dark:text-eco-sage mt-1">
-                          Est. {pickup.quantity}kg · Scheduled {pickup.pickup_date}
+                          Est. {pickup.quantity}kg Â· Scheduled {pickup.pickup_date}
                         </p>
                         {pickup.address && (
                           <p className="text-xs text-eco-mint dark:text-eco-sage mt-1">
@@ -203,7 +203,7 @@ export default function CollectorDashboard() {
                     className="p-4 bg-white dark:bg-eco-charcoal rounded-xl border border-eco-sage/20 flex items-center justify-between"
                   >
                     <p className="text-sm text-eco-forest dark:text-white">
-                      {pickup.category_detail?.category_name || 'Pickup Request'} · {pickup.quantity}kg
+                      {pickup.category_detail?.category_name || 'Pickup Request'} Â· {pickup.quantity}kg
                     </p>
                     <span
                       className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${STATUS_STYLES[pickup.status] || 'bg-gray-100 text-gray-800'}`}

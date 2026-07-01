@@ -1,4 +1,4 @@
-from rest_framework.decorators import action
+﻿from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -71,7 +71,7 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         if user.role == 'citizen':
             return PickupRequest.objects.filter(user=user)
         elif user.role == 'collector':
-            return PickupRequest.objects.filter(assigned_collector_id=user.id)
+            return PickupRequest.objects.filter(assigned_collector__user=user)
         return PickupRequest.objects.all()
 
     # PATCH /api/v1/pickup-requests/{id}/assign/
@@ -98,7 +98,7 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         return Response(PickupRequestSerializer(pickup).data)
 
     # PATCH /api/v1/pickup-requests/{id}/status/
-    @action(detail=True, methods=['patch'], permission_classes=[IsCollector, IsStaffOrAdmin])
+    @action(detail=True, methods=['patch'], permission_classes=[IsCollector | IsStaffOrAdmin])
     def status(self, request, pk=None):
         pickup = self.get_object()
         new_status = request.data.get('status')
@@ -179,6 +179,9 @@ class CollectionViewSet(viewsets.ModelViewSet):
     serializer_class = CollectionSerializer
     permission_classes = [IsAuthenticated]
 
+    def perform_create(self, serializer):
+        serializer.save(collector=self.request.user.collector_profile)
+
 class RecyclingViewSet(viewsets.ModelViewSet):
     queryset = Recycling.objects.all()
     serializer_class = RecyclingSerializer
@@ -193,3 +196,6 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all().order_by('-created_at')
     serializer_class = AuditLogSerializer
     permission_classes = [IsAdminUserRole]
+
+
+

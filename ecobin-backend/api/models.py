@@ -1,6 +1,8 @@
-import uuid
+﻿import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.conf import settings
+
 
 # --- 1. USER MANAGER & CUSTOM USER MODEL ---
 class UserManager(BaseUserManager):
@@ -9,7 +11,7 @@ class UserManager(BaseUserManager):
             raise ValueError("Users must have an email address")
         email = self.normalize_email(email)
         user = self.model(email=email, full_name=full_name, phone=phone, **extra_fields)
-        user.set_password(password)  # Securely hashes the password before saving
+        user.set_password(password)
         user.save(using=self._db)
         return user
 
@@ -19,6 +21,7 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('is_superuser', True)
         return self.create_user(email, full_name, phone, password, **extra_fields)
 
+
 class User(AbstractBaseUser, PermissionsMixin):
     ROLE_CHOICES = [
         ('citizen', 'Citizen'),
@@ -27,13 +30,13 @@ class User(AbstractBaseUser, PermissionsMixin):
     ]
 
     user_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    full_name = models.CharField(max_length=255)  # Fixed the max_ok typo here!
+    full_name = models.CharField(max_length=255)
     email = models.EmailField(unique=True, max_length=255)
     phone = models.CharField(max_length=20)
     address = models.TextField(blank=True, null=True)
     role = models.CharField(max_length=15, choices=ROLE_CHOICES, default='citizen')
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
@@ -74,6 +77,7 @@ class SmartBin(models.Model):
 
     def __str__(self):
         return f"Bin {str(self.bin_id)[:8]} - {self.location}"
+
 
 # --- 4. COLLECTORS PROFILE MODEL ---
 class Collector(models.Model):
@@ -147,7 +151,7 @@ class Feedback(models.Model):
     feedback_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feedbacks')
     collection = models.ForeignKey(Collection, on_delete=models.SET_NULL, null=True, blank=True, related_name='feedbacks')
-    rating = models.IntegerField()  # Will validate 1-5 in serializers
+    rating = models.IntegerField()
     comments = models.TextField()
     submitted_at = models.DateTimeField(auto_now_add=True)
 
@@ -193,52 +197,3 @@ class PasswordResetToken(models.Model):
 
     def __str__(self):
         return f"Reset Token for {self.user.email}"
-
-
-import uuid
-from django.db import models
-from django.conf import settings
-
-class Collection(models.Model):
-    collection_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    request = models.OneToOneField('PickupRequest', on_delete=models.PROTECT, related_name='collection')
-    collector = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, limit_choices_to={'role': 'collector'})
-    collection_date = models.DateField(auto_now_add=True)
-    collected_weight = models.FloatField()
-    remarks = models.TextField(blank=True, null=True)
-
-    def __str__(self):
-        return f"Collection {self.collection_id} - {self.collected_weight}kg"
-
-class Recycling(models.Model):
-    recycle_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    collection = models.OneToOneField(Collection, on_delete=models.PROTECT, related_name='recycling')
-    recycled_weight = models.FloatField()
-    recycling_center = models.CharField(max_length=255)
-    recycled_date = models.DateField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Recycling {self.recycle_id} - {self.recycled_weight}kg"
-
-class Feedback(models.Model):
-    feedback_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='feedbacks')
-    collection = models.ForeignKey(Collection, on_delete=models.SET_NULL, null=True, blank=True, related_name='feedbacks')
-    rating = models.IntegerField()  # Should validate 1-5 on frontend/serializer
-    comments = models.TextField()
-    submitted_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Feedback {self.feedback_id} by {self.user.email} ({self.rating}/5)"
-
-class AuditLog(models.Model):
-    log_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
-    action = models.CharField(max_length=255)
-    target_entity = models.CharField(max_length=255, blank=True, null=True)
-    target_id = models.CharField(max_length=255, blank=True, null=True)
-    details = models.TextField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"[{self.created_at}] User {self.user} performed {self.action}"

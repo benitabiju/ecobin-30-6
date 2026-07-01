@@ -1,4 +1,4 @@
-const API_BASE = 'http://127.0.0.1:8000/api/v1';
+﻿const API_BASE = 'http://127.0.0.1:8001/api/v1';
 
 export async function registerUser({ full_name, email, phone, address, password }) {
   const response = await fetch(`${API_BASE}/auth/register/`, {
@@ -64,7 +64,7 @@ export async function authFetch(path, options = {}) {
   });
 
   if (response.status === 401) {
-    // Token missing/expired — log the user out and let the calling page redirect
+    // Token missing/expired â€” log the user out and let the calling page redirect
     logoutUser();
     throw new Error('Session expired. Please log in again.');
   }

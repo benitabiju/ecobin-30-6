@@ -1,4 +1,4 @@
-import { authFetch } from './auth';
+﻿import { authFetch } from './auth';
 
 // Fetches the logged-in user's own profile, including `role`.
 // Backed by UserProfileViewSet's /users/me/ GET action.

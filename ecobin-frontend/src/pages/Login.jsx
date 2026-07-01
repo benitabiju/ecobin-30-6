@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { loginUser } from '../api/auth';
+import { getMyProfile } from '../api/Users';
 
 export default function Login({ onLoginSuccess }) {
   const navigate = useNavigate();
@@ -19,7 +20,14 @@ export default function Login({ onLoginSuccess }) {
     try {
       await loginUser(email, password);
       onLoginSuccess?.();
-      navigate('/dashboard'); // redirect to dashboard after successful login
+      const profile = await getMyProfile();
+      if (profile.role === 'collector') {
+        navigate('/collector/home');
+      } else if (profile.role === 'admin') {
+        navigate('/admin/dashboard');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -74,7 +82,7 @@ export default function Login({ onLoginSuccess }) {
               onChange={(e) => setPassword(e.target.value)}
               required
               className="w-full p-3 bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-eco-forest"
-              placeholder="••••••••"
+              placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
             />
           </div>
 
@@ -97,3 +105,5 @@ export default function Login({ onLoginSuccess }) {
     </main>
   );
 }
+
+

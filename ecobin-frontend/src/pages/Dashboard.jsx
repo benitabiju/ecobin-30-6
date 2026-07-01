@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { getMyPickups } from '../api/pickups';
-import { getMyProfile } from '../api/users';
-import CollectorDashboard from './CollectorDashboard';
+import { getMyProfile } from '../api/Users';
+import CollectorDashboard from './Collectordashboard';
 
 const STATUS_STYLES = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -65,7 +65,7 @@ function CitizenDashboard() {
                   {pickup.category_detail?.category_name || 'Pickup Request'}
                 </p>
                 <p className="text-sm text-eco-mint dark:text-eco-sage mt-1">
-                  {pickup.quantity}kg · Scheduled {pickup.pickup_date}
+                  {pickup.quantity}kg Â· Scheduled {pickup.pickup_date}
                 </p>
               </div>
               <span
@@ -122,7 +122,7 @@ export default function Dashboard() {
     return <CollectorDashboard />;
   }
 
-  // Admins land on the citizen view for now too — swap in an AdminDashboard
+  // Admins land on the citizen view for now too â€” swap in an AdminDashboard
   // here later if/when you build one.
   return <CitizenDashboard />;
 }

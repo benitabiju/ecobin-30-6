@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import logo from './assets/logo1.png'; 
 
@@ -13,6 +13,9 @@ import Contact from './pages/Contact';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import CollectorDashboard from './pages/Collectordashboard';
+import AdminDashboard from './pages/AdminDashboard';
+import CollectorLayout from './layouts/CollectorLayout';
 import ProtectedRoute from './pages/ProtectedRoute';
 import { isLoggedIn, logoutUser } from './api/auth';
 import HeroCarousel from './pages/HeroCarousel';
@@ -170,6 +173,24 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/admin/dashboard"
+              element={
+                <ProtectedRoute>
+                  <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/collector"
+              element={
+                <ProtectedRoute>
+                  <CollectorLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="home" element={<CollectorDashboard />} />
+            </Route>
           </Routes>
         </main>
 
@@ -182,3 +203,4 @@ function App() {
 }
 
 export default App;
+
