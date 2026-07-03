@@ -16,3 +16,23 @@
   --font-display: "Playfair Display", serif;
   --font-sans: "Plus Jakarta Sans", sans-serif;
 }
+
+@layer utilities {
+  .glow-emerald {
+    box-shadow: 0 0 15px rgba(49, 87, 44, 0.4);
+    transition: box-shadow 0.3s ease-in-out, transform 0.3s ease-in-out;
+  }
+  .glow-emerald:hover {
+    box-shadow: 0 0 30px rgba(49, 87, 44, 0.7);
+    transform: translateY(-2px);
+  }
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .dark .glass-panel {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+}

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getAssignedPickups, updatePickupStatus, logCollection } from '../api/Collector';
 
 const STATUS_STYLES = {
@@ -101,7 +101,7 @@ export default function CollectorDashboard() {
     }
   }
 
-  const activePickups = pickups.filter((p) => p.status === 'assigned');
+  const activePickups = pickups.filter((p) => ['assigned', 'pending'].includes(p.status));
   const completedPickups = pickups.filter((p) =>
     ['collected', 'recycled'].includes(p.status)
   );
@@ -111,9 +111,23 @@ export default function CollectorDashboard() {
       <h1 className="font-display text-3xl font-bold text-eco-forest dark:text-white mb-2">
         Collector dashboard
       </h1>
-      <p className="text-sm text-eco-mint dark:text-eco-sage mb-10">
+      <p className="text-sm text-eco-mint dark:text-eco-sage mb-6">
         Your assigned pickups for today.
       </p>
+
+      {/* Dashboard Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+        <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-gray-100 dark:border-eco-sage/20 shadow-sm flex flex-col hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+          <span className="text-sm font-semibold text-gray-500 dark:text-eco-sage uppercase tracking-wider mb-2">Total Assigned</span>
+          <span className="text-3xl font-bold text-eco-forest dark:text-white">{pickups.length}</span>
+        </div>
+        <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-gray-100 dark:border-eco-sage/20 shadow-sm flex flex-col hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
+          <span className="text-sm font-semibold text-gray-500 dark:text-eco-sage uppercase tracking-wider mb-2">To Collect</span>
+          <span className="text-3xl font-bold text-eco-forest dark:text-white">
+            {activePickups.length}
+          </span>
+        </div>
+      </div>
 
       {error && (
         <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
@@ -140,7 +154,7 @@ export default function CollectorDashboard() {
                 {activePickups.map((pickup) => (
                   <div
                     key={pickup.request_id}
-                    className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm"
+                    className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
                   >
                     <div className="flex items-center justify-between">
                       <div>
@@ -200,7 +214,7 @@ export default function CollectorDashboard() {
                 {completedPickups.map((pickup) => (
                   <div
                     key={pickup.request_id}
-                    className="p-4 bg-white dark:bg-eco-charcoal rounded-xl border border-eco-sage/20 flex items-center justify-between"
+                    className="p-4 bg-white dark:bg-eco-charcoal rounded-xl border border-eco-sage/20 flex items-center justify-between hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
                   >
                     <p className="text-sm text-eco-forest dark:text-white">
                       {pickup.category_detail?.category_name || 'Pickup Request'} Â· {pickup.quantity}kg

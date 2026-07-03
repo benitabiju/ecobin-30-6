@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.conf import settings
@@ -137,7 +137,8 @@ class Collection(models.Model):
 # --- 7. RECYCLING MODEL ---
 class Recycling(models.Model):
     recycle_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    collection = models.OneToOneField(Collection, on_delete=models.PROTECT, related_name='recycling_record')
+    # collection links the recycling record to a collection; allow it to be null for citizen submissions
+    collection = models.OneToOneField(Collection, on_delete=models.PROTECT, related_name='recycling_record', null=True, blank=True)
     recycled_weight = models.FloatField()
     recycling_center = models.CharField(max_length=255)
     recycled_date = models.DateField()

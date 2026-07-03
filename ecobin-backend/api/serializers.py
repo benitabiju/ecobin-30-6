@@ -84,7 +84,13 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ['user_id', 'email', 'role', 'created_at']
 
 from rest_framework import serializers
-from .models import Collection, Recycling, Feedback, AuditLog, PasswordResetToken
+from .models import Notification, Collection, Recycling, Feedback, AuditLog, PasswordResetToken
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ['notification_id', 'title', 'message', 'is_read', 'created_at']
+        read_only_fields = ['notification_id', 'created_at']
 
 class CollectionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -92,9 +98,14 @@ class CollectionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class RecyclingSerializer(serializers.ModelSerializer):
+    # Expose a consistent `recycling_id` field derived from the model's `recycle_id`
+    recycling_id = serializers.UUIDField(source='recycle_id', read_only=True)
+    # collection is optional for citizen submissions
+    collection = serializers.PrimaryKeyRelatedField(read_only=True, required=False)
     class Meta:
         model = Recycling
-        fields = '__all__'
+        fields = ['recycling_id', 'collection', 'recycled_weight', 'recycling_center', 'recycled_date']
+        read_only_fields = ['recycling_id']
 
 class FeedbackSerializer(serializers.ModelSerializer):
     class Meta:

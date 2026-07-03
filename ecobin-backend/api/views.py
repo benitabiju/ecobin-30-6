@@ -1,9 +1,11 @@
-﻿from rest_framework.decorators import action
+from rest_framework.decorators import action
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.contrib.auth import get_user_model
+from django.conf import settings
+from django.core.mail import send_mail
 
 from .serializers import CitizenRegistrationSerializer
 from .permissions import IsCitizen, IsCollector, IsStaffOrAdmin as IsAdminUserRole
@@ -17,9 +19,16 @@ class RegisterCitizenView(APIView):
         serializer = CitizenRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
+            user = serializer.instance
+            from rest_framework_simplejwt.tokens import RefreshToken
+            refresh = RefreshToken.for_user(user)
             return Response(
-                {"message": "Citizen registered successfully."}, 
-                status=status.HTTP_201_CREATED
+                {
+                    "message": "Citizen registered successfully.",
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                },
+                status=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -58,7 +67,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from .models import PickupRequest, Collection, Recycling, Feedback, AuditLog
+from .models import PickupRequest, Collection, Recycling, Feedback, AuditLog, Notification
 from .serializers import PickupRequestSerializer # Assuming your serializers match fields
 from .permissions import IsCollector, IsStaffOrAdmin, IsCitizen
 
@@ -73,6 +82,15 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         elif user.role == 'collector':
             return PickupRequest.objects.filter(assigned_collector__user=user)
         return PickupRequest.objects.all()
+
+    def perform_create(self, serializer):
+        pickup = serializer.save(user=self.request.user)
+        # Create a notification for the citizen who submitted the pickup request
+        Notification.objects.create(
+            user=self.request.user,
+            title='Pickup Request Submitted',
+            message=f'Your pickup request {pickup.request_id} has been submitted.'
+        )
 
     # PATCH /api/v1/pickup-requests/{id}/assign/
     @action(detail=True, methods=['patch'], permission_classes=[IsStaffOrAdmin])
@@ -114,13 +132,21 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Collector, Collection
-from .serializers import CollectorProfileSerializer, UpdatePickupStatusSerializer
+from .models import Collector, Collection, Notification
+from .serializers import CollectorProfileSerializer, UpdatePickupStatusSerializer, NotificationSerializer
 
 class CollectorViewSet(viewsets.ModelViewSet):
     queryset = Collector.objects.all()
     serializer_class = CollectorProfileSerializer
     permission_classes = [IsAuthenticated]
+
+class NotificationViewSet(viewsets.ModelViewSet):
+    queryset = Notification.objects.all()
+    serializer_class = NotificationSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return self.queryset.filter(user=self.request.user)
 
 # Add custom route assignment logic inside your existing PickupRequestViewSet
 # Update your existing PickupRequestViewSet class to include these actions:
@@ -156,6 +182,14 @@ from .serializers import UserProfileSerializer
 class UserProfileViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
+    def list(self, request):
+        if request.user.role != 'admin':
+            from rest_framework import status
+            return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+        users = User.objects.all()
+        serializer = UserProfileSerializer(users, many=True)
+        return Response(serializer.data)
+
     @action(detail=False, methods=['get', 'put', 'patch'], url_path='me')
     def manage_profile(self, request):
         user = request.user
@@ -172,6 +206,7 @@ class UserProfileViewSet(viewsets.ViewSet):
 
 
 
+
 from .serializers import CollectionSerializer, RecyclingSerializer, FeedbackSerializer, AuditLogSerializer
 
 class CollectionViewSet(viewsets.ModelViewSet):
@@ -183,9 +218,20 @@ class CollectionViewSet(viewsets.ModelViewSet):
         serializer.save(collector=self.request.user.collector_profile)
 
 class RecyclingViewSet(viewsets.ModelViewSet):
-    queryset = Recycling.objects.all()
     serializer_class = RecyclingSerializer
-    permission_classes = [IsAdminUserRole]
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        # Citizens can only see their own recycling records linked via collection->request->user
+        return Recycling.objects.filter(collection__request__user=self.request.user)
+
+    def perform_create(self, serializer):
+        # Ensure the collection belongs to the citizen if provided
+        collection = serializer.validated_data.get('collection')
+        if collection and collection.request.user != self.request.user:
+            from rest_framework import serializers
+            raise serializers.ValidationError('Cannot create recycling for another user')
+        serializer.save()
 
 class FeedbackViewSet(viewsets.ModelViewSet):
     queryset = Feedback.objects.all()
@@ -199,3 +245,25 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
+
+
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        old_password = request.data.get('old_password')
+        new_password = request.data.get('new_password')
+        
+        if not old_password or not new_password:
+            return Response({"error": "Old and new passwords are required"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        user = request.user
+        if not user.check_password(old_password):
+            return Response({"error": "Incorrect old password"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)

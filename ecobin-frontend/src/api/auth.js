@@ -1,4 +1,4 @@
-﻿const API_BASE = 'http://127.0.0.1:8001/api/v1';
+const API_BASE = 'http://127.0.0.1:8000/api/v1';
 
 export async function registerUser({ full_name, email, phone, address, password }) {
   const response = await fetch(`${API_BASE}/auth/register/`, {
@@ -10,10 +10,15 @@ export async function registerUser({ full_name, email, phone, address, password 
   const data = await response.json();
 
   if (!response.ok) {
-    // DRF returns field-level errors, e.g. { email: ["A user with this email already exists."] }
     const firstError = Object.values(data)[0];
     const message = Array.isArray(firstError) ? firstError[0] : 'Registration failed.';
     throw new Error(message);
+  }
+
+  // Save tokens if returned (development mode returns only message, production returns JWTs)
+  if (data.access && data.refresh) {
+    localStorage.setItem('access_token', data.access);
+    localStorage.setItem('refresh_token', data.refresh);
   }
 
   return data;
@@ -82,4 +87,39 @@ export async function authFetch(path, options = {}) {
 
 export function isLoggedIn() {
   return !!getAccessToken();
+}
+
+export async function requestPasswordReset(email) {
+  const response = await fetch(`${API_BASE}/auth/password-reset/request/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || data.message || 'Request failed.');
+  }
+  return data;
+}
+
+export async function confirmPasswordReset(token, new_password) {
+  const response = await fetch(`${API_BASE}/auth/password-reset/confirm/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, new_password }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Request failed.');
+  }
+  return data;
+}
+
+export async function changePassword(old_password, new_password) {
+  return await authFetch('/auth/password/change/', {
+    method: 'POST',
+    body: JSON.stringify({ old_password, new_password }),
+  });
 }

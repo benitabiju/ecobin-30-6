@@ -1,5 +1,6 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { authFetch } from '../api/auth';
+import ChangePasswordForm from '../components/ChangePasswordForm';
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({ pickups: 0, bins: 0, collectors: 0 });
@@ -47,20 +48,24 @@ export default function AdminDashboard() {
         <p className="text-sm text-eco-mint dark:text-eco-sage">Loading stats...</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm">
+          <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
             <p className="text-3xl font-bold text-eco-forest dark:text-white">{stats.pickups}</p>
             <p className="text-sm text-eco-mint dark:text-eco-sage mt-1">Total pickup requests</p>
           </div>
-          <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm">
+          <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
             <p className="text-3xl font-bold text-eco-forest dark:text-white">{stats.bins}</p>
             <p className="text-sm text-eco-mint dark:text-eco-sage mt-1">Smart bins</p>
           </div>
-          <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm">
+          <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
             <p className="text-3xl font-bold text-eco-forest dark:text-white">{stats.collectors}</p>
             <p className="text-sm text-eco-mint dark:text-eco-sage mt-1">Collectors</p>
           </div>
         </div>
       )}
+        <section className="mt-12">
+          <h2 className="text-2xl font-semibold text-eco-forest dark:text-white mb-4">Change Password</h2>
+          <ChangePasswordForm />
+        </section>
     </main>
   );
 }

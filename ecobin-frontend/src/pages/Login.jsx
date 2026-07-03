@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { loginUser } from '../api/auth';
 import { getMyProfile } from '../api/Users';
@@ -22,7 +22,7 @@ export default function Login({ onLoginSuccess }) {
       onLoginSuccess?.();
       const profile = await getMyProfile();
       if (profile.role === 'collector') {
-        navigate('/collector/home');
+        navigate('/collector/dashboard');
       } else if (profile.role === 'admin') {
         navigate('/admin/dashboard');
       } else {
@@ -84,6 +84,12 @@ export default function Login({ onLoginSuccess }) {
               className="w-full p-3 bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-eco-forest"
               placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
             />
+          </div>
+
+          <div className="flex justify-end">
+            <Link to="/forgot-password" className="text-xs font-bold text-eco-forest dark:text-eco-sage hover:underline">
+              Forgot Password?
+            </Link>
           </div>
 
           <button

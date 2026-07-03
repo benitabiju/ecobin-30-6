@@ -11,7 +11,6 @@ export default function Register() {
     address: '',
     password: '',
   });
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -23,10 +22,6 @@ export default function Register() {
     e.preventDefault();
     setError('');
 
-    if (form.password !== confirmPassword) {
-      setError("Passwords don't match.");
-      return;
-    }
     if (form.password.length < 8) {
       setError('Password must be at least 8 characters.');
       return;
@@ -132,20 +127,6 @@ export default function Register() {
               required
               className="w-full p-3 bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-eco-forest"
               placeholder="At least 8 characters"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold uppercase text-eco-mint dark:text-eco-sage mb-1">
-              Confirm password
-            </label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-              className="w-full p-3 bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-eco-forest"
-              placeholder="••••••••"
             />
           </div>
 

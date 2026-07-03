@@ -16,7 +16,7 @@ export function useDarkMode() {
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === 'light' ? 'dark' : 'darkBg')); // switches between modes
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light')); // switches between modes
   };
 
   return [theme, toggleTheme];

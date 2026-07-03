@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from .models import (
@@ -6,9 +7,24 @@ from .models import (
     Notification, AuditLog, PasswordResetToken
 )
 
+class CustomUserCreationForm(forms.ModelForm):
+    password = forms.CharField(widget=forms.PasswordInput)
+
+    class Meta:
+        model = User
+        fields = ('email', 'full_name', 'phone', 'password', 'role', 'is_staff', 'is_active')
+
+    def save(self, commit=True):
+        user = super().save(commit=False)
+        user.set_password(self.cleaned_data["password"])
+        if commit:
+            user.save()
+        return user
+
 # Custom configuration for managing your UUID-based Custom User Model
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
+    add_form = CustomUserCreationForm
     # Using 'user_id' instead of default 'id' since it's a UUID field
     ordering = ('email',)
     list_display = ('email', 'full_name', 'role', 'is_staff', 'is_active')

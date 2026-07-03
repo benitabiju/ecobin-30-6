@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='recycling',
             name='collection',
-            field=models.OneToOneField(on_delete=django.db.models.deletion.PROTECT, related_name='recycling', to='api.collection'),
+            field=models.OneToOneField(null=True, blank=True,on_delete=django.db.models.deletion.PROTECT, related_name='recycling_record', to='api.collection'),
         ),
         migrations.AlterField(
             model_name='recycling',

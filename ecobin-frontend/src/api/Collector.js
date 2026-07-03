@@ -1,4 +1,9 @@
-﻿import { authFetch } from './auth';
+import { authFetch } from './auth';
+
+// Fetches all collectors (admin only)
+export async function getAllCollectors() {
+  return authFetch('/collectors/');
+}
 
 // Returns pickups assigned to the logged-in collector.
 // Reuses the same /pickups/ endpoint as citizens â€” the backend's
