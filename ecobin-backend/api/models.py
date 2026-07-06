@@ -54,6 +54,9 @@ class WasteCategory(models.Model):
     category_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     category_name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
+    icon = models.CharField(max_length=50, blank=True, null=True)
+    disposal_category = models.CharField(max_length=50, default='GENERAL')
+    items = models.JSONField(default=list)
 
     def __str__(self):
         return self.category_name
@@ -88,7 +91,7 @@ class Collector(models.Model):
     ]
 
     collector_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.OneToOneField(User, on_delete=models.PROTECT, related_name='collector_profile')
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='collector_profile')
     vehicle_number = models.CharField(max_length=50, blank=True, null=True)
     assigned_area = models.CharField(max_length=255, blank=True, null=True)
     availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default='available')
@@ -108,13 +111,16 @@ class PickupRequest(models.Model):
     ]
 
     request_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.PROTECT, related_name='pickup_requests')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='pickup_requests')
     bin = models.ForeignKey(SmartBin, on_delete=models.SET_NULL, null=True, blank=True)
     category = models.ForeignKey(WasteCategory, on_delete=models.PROTECT)
     assigned_collector = models.ForeignKey(Collector, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_requests')
     quantity = models.FloatField()
     pickup_date = models.DateField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    address = models.TextField(blank=True, null=True)
+    latitude = models.FloatField(blank=True, null=True)
+    longitude = models.FloatField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -124,8 +130,8 @@ class PickupRequest(models.Model):
 # --- 6. COLLECTIONS MODEL ---
 class Collection(models.Model):
     collection_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    request = models.OneToOneField(PickupRequest, on_delete=models.PROTECT, related_name='collection_record')
-    collector = models.ForeignKey(Collector, on_delete=models.PROTECT, related_name='collections_made')
+    request = models.OneToOneField(PickupRequest, on_delete=models.SET_NULL, null=True, blank=True, related_name='collection_record')
+    collector = models.ForeignKey(Collector, on_delete=models.SET_NULL, null=True, blank=True, related_name='collections_made')
     collection_date = models.DateField(auto_now_add=True)
     collected_weight = models.FloatField()
     remarks = models.TextField(blank=True, null=True)
@@ -138,7 +144,7 @@ class Collection(models.Model):
 class Recycling(models.Model):
     recycle_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # collection links the recycling record to a collection; allow it to be null for citizen submissions
-    collection = models.OneToOneField(Collection, on_delete=models.PROTECT, related_name='recycling_record', null=True, blank=True)
+    collection = models.OneToOneField(Collection, on_delete=models.SET_NULL, related_name='recycling_record', null=True, blank=True)
     recycled_weight = models.FloatField()
     recycling_center = models.CharField(max_length=255)
     recycled_date = models.DateField()

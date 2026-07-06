@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { getAssignedPickups, updatePickupStatus, logCollection } from '../api/Collector';
+import RecyclableBadge from '../components/RecyclableBadge';
+import { MapPin, User, RefreshCw } from 'lucide-react';
 
 const STATUS_STYLES = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  assigned: 'bg-blue-100 text-blue-800',
+  pending:   'bg-yellow-100 text-yellow-800',
+  assigned:  'bg-blue-100 text-blue-800',
   collected: 'bg-purple-100 text-purple-800',
-  recycled: 'bg-green-100 text-green-800',
+  recycled:  'bg-green-100 text-green-800',
   cancelled: 'bg-red-100 text-red-800',
 };
 
@@ -31,28 +33,28 @@ function CompletionForm({ pickup, onSubmit, onCancel, submitting }) {
           value={weight}
           onChange={(e) => setWeight(e.target.value)}
           placeholder="Actual weight (kg)"
-          className="flex-1 p-2 text-sm bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg"
+          className="input-modern flex-1 py-2 text-sm"
         />
       </div>
       <textarea
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        placeholder="Notes (optional â€” e.g. access issues, contamination)"
+        placeholder="Notes (optional — e.g. access issues, contamination)"
         rows="2"
-        className="p-2 text-sm bg-gray-50 dark:bg-black/30 border border-eco-sage/20 rounded-lg"
+        className="input-modern py-2 text-sm"
       />
       <div className="flex gap-2">
         <button
           type="submit"
           disabled={submitting}
-          className="px-4 py-2 bg-eco-forest text-white text-xs font-bold uppercase rounded-md disabled:opacity-50"
+          className="btn-primary py-2 px-4 text-xs disabled:opacity-50"
         >
           {submitting ? 'Saving...' : 'Confirm collection'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 border border-eco-sage/30 text-xs font-bold uppercase rounded-md"
+          className="btn-secondary py-2 px-4 text-xs"
         >
           Cancel
         </button>
@@ -67,33 +69,39 @@ export default function CollectorDashboard() {
   const [error, setError] = useState('');
   const [activeFormId, setActiveFormId] = useState(null);
   const [submittingId, setSubmittingId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(new Date());
 
-  async function loadPickups() {
+  const loadPickups = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
       const data = await getAssignedPickups();
       setPickups(Array.isArray(data) ? data : data.results || []);
+      setLastRefreshed(new Date());
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     loadPickups();
-  }, []);
+    // Auto-refresh every 30 seconds to pick up new assignments
+    const interval = setInterval(() => loadPickups(true), 30000);
+    return () => clearInterval(interval);
+  }, [loadPickups]);
 
   async function handleComplete(pickup, weight, notes) {
     setSubmittingId(pickup.request_id);
     setError('');
     try {
-      // Log the weight/notes record, then flip status to 'collected'.
-      // If your backend auto-sets status when a Collection is created,
-      // the second call is harmless but may be redundant â€” adjust as needed.
       await logCollection(pickup.request_id, weight, notes);
       await updatePickupStatus(pickup.request_id, 'collected');
       setActiveFormId(null);
-      await loadPickups();
+      await loadPickups(true);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -101,31 +109,44 @@ export default function CollectorDashboard() {
     }
   }
 
-  const activePickups = pickups.filter((p) => ['assigned', 'pending'].includes(p.status));
-  const completedPickups = pickups.filter((p) =>
-    ['collected', 'recycled'].includes(p.status)
-  );
+  const activePickups    = pickups.filter((p) => ['assigned', 'pending'].includes(p.status));
+  const completedPickups = pickups.filter((p) => ['collected', 'recycled'].includes(p.status));
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-16">
-      <h1 className="font-display text-3xl font-bold text-eco-forest dark:text-white mb-2">
-        Collector dashboard
-      </h1>
-      <p className="text-sm text-eco-mint dark:text-eco-sage mb-6">
-        Your assigned pickups for today.
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="font-display text-3xl font-bold text-primary">
+          Collector dashboard
+        </h1>
+        <button
+          onClick={() => loadPickups(true)}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-secondary border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+      <p className="text-sm text-secondary mb-1">
+        Your assigned pickups. Auto-refreshes every 30s.
+      </p>
+      <p className="text-xs text-muted mb-8">
+        Last updated: {lastRefreshed.toLocaleTimeString()}
       </p>
 
       {/* Dashboard Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-        <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-gray-100 dark:border-eco-sage/20 shadow-sm flex flex-col hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-          <span className="text-sm font-semibold text-gray-500 dark:text-eco-sage uppercase tracking-wider mb-2">Total Assigned</span>
-          <span className="text-3xl font-bold text-eco-forest dark:text-white">{pickups.length}</span>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+        <div className="p-6 card-modern flex flex-col hover:border-eco-emerald/50">
+          <span className="text-sm font-bold text-muted uppercase tracking-wider mb-2">Total Assigned</span>
+          <span className="text-4xl font-extrabold text-primary">{pickups.length}</span>
         </div>
-        <div className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-gray-100 dark:border-eco-sage/20 shadow-sm flex flex-col hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-          <span className="text-sm font-semibold text-gray-500 dark:text-eco-sage uppercase tracking-wider mb-2">To Collect</span>
-          <span className="text-3xl font-bold text-eco-forest dark:text-white">
-            {activePickups.length}
-          </span>
+        <div className="p-6 card-modern flex flex-col hover:border-eco-emerald/50">
+          <span className="text-sm font-bold text-muted uppercase tracking-wider mb-2">To Collect</span>
+          <span className="text-4xl font-extrabold text-primary">{activePickups.length}</span>
+        </div>
+        <div className="p-6 card-modern flex flex-col hover:border-eco-emerald/50">
+          <span className="text-sm font-bold text-muted uppercase tracking-wider mb-2">Completed</span>
+          <span className="text-4xl font-extrabold text-primary">{completedPickups.length}</span>
         </div>
       </div>
 
@@ -136,16 +157,16 @@ export default function CollectorDashboard() {
       )}
 
       {loading ? (
-        <p className="text-sm text-eco-mint dark:text-eco-sage">Loading your route...</p>
+        <p className="text-sm text-secondary">Loading your route...</p>
       ) : (
         <>
           <section className="mb-12">
-            <h2 className="font-display text-xl font-bold text-eco-forest dark:text-white mb-4">
+            <h2 className="font-display text-xl font-bold text-primary mb-4">
               To collect ({activePickups.length})
             </h2>
             {activePickups.length === 0 ? (
-              <div className="p-8 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 text-center">
-                <p className="text-sm text-eco-mint dark:text-eco-sage">
+              <div className="p-8 card-modern text-center">
+                <p className="text-sm text-secondary">
                   No pickups currently assigned to you.
                 </p>
               </div>
@@ -154,37 +175,62 @@ export default function CollectorDashboard() {
                 {activePickups.map((pickup) => (
                   <div
                     key={pickup.request_id}
-                    className="p-6 bg-white dark:bg-eco-charcoal rounded-2xl border border-eco-sage/20 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
+                    className="p-6 card-modern hover:border-eco-emerald/50"
                   >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-eco-forest dark:text-white">
-                          {pickup.category_detail?.category_name || 'Pickup Request'}
-                        </p>
-                        <p className="text-sm text-eco-mint dark:text-eco-sage mt-1">
-                          Est. {pickup.quantity}kg Â· Scheduled {pickup.pickup_date}
-                        </p>
-                        {pickup.address && (
-                          <p className="text-xs text-eco-mint dark:text-eco-sage mt-1">
-                            {pickup.address}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        {/* Category + Status */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-bold text-primary text-lg">
+                            {pickup.category_detail?.category_name || 'Pickup Request'}
                           </p>
+                          {pickup.category_detail?.disposal_category === 'RECYCLABLE' && <RecyclableBadge />}
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${STATUS_STYLES[pickup.status] || 'bg-gray-100 text-secondary'}`}>
+                            {pickup.status}
+                          </span>
+                        </div>
+
+                        {/* Weight + Date */}
+                        <p className="text-sm text-secondary mt-1">
+                          Est. {pickup.quantity}kg · Scheduled {pickup.pickup_date}
+                        </p>
+
+                        {/* Citizen Info */}
+                        {pickup.user_detail && (
+                          <div className="mt-2 flex items-center gap-1.5 text-sm text-muted">
+                            <User className="w-3.5 h-3.5" />
+                            <span className="font-medium text-secondary">{pickup.user_detail.full_name}</span>
+                            <span className="text-xs">· {pickup.user_detail.phone || pickup.user_detail.email}</span>
+                          </div>
                         )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${STATUS_STYLES[pickup.status] || 'bg-gray-100 text-gray-800'}`}
-                        >
-                          {pickup.status}
-                        </span>
-                        {activeFormId !== pickup.request_id && (
-                          <button
-                            onClick={() => setActiveFormId(pickup.request_id)}
-                            className="px-4 py-2 bg-eco-forest text-white text-xs font-bold uppercase rounded-md"
+
+                        {/* Address + Map */}
+                        {pickup.address && (
+                          <div className="mt-1.5 flex items-start gap-1.5 text-sm text-muted">
+                            <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{pickup.address}</span>
+                          </div>
+                        )}
+                        {pickup.latitude && pickup.longitude && (
+                          <a
+                            href={`https://www.google.com/maps?q=${pickup.latitude},${pickup.longitude}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 mt-1.5 text-xs font-medium text-[#387478] hover:underline"
                           >
-                            Mark collected
-                          </button>
+                            <MapPin className="w-3 h-3" /> View on Map ↗
+                          </a>
                         )}
                       </div>
+
+                      {activeFormId !== pickup.request_id && (
+                        <button
+                          onClick={() => setActiveFormId(pickup.request_id)}
+                          className="btn-primary py-2 px-4 text-xs shrink-0"
+                        >
+                          Mark collected
+                        </button>
+                      )}
                     </div>
 
                     {activeFormId === pickup.request_id && (
@@ -202,11 +248,11 @@ export default function CollectorDashboard() {
           </section>
 
           <section>
-            <h2 className="font-display text-xl font-bold text-eco-forest dark:text-white mb-4">
+            <h2 className="font-display text-xl font-bold text-primary mb-4">
               Recently completed
             </h2>
             {completedPickups.length === 0 ? (
-              <p className="text-sm text-eco-mint dark:text-eco-sage">
+              <p className="text-sm text-secondary">
                 Nothing completed yet.
               </p>
             ) : (
@@ -214,14 +260,20 @@ export default function CollectorDashboard() {
                 {completedPickups.map((pickup) => (
                   <div
                     key={pickup.request_id}
-                    className="p-4 bg-white dark:bg-eco-charcoal rounded-xl border border-eco-sage/20 flex items-center justify-between hover:shadow-xl hover:-translate-y-1 transition-all duration-300"
+                    className="p-5 card-modern flex items-center justify-between shadow-sm border-eco-sage/10"
                   >
-                    <p className="text-sm text-eco-forest dark:text-white">
-                      {pickup.category_detail?.category_name || 'Pickup Request'} Â· {pickup.quantity}kg
-                    </p>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${STATUS_STYLES[pickup.status] || 'bg-gray-100 text-gray-800'}`}
-                    >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-primary">
+                          {pickup.category_detail?.category_name || 'Pickup Request'} · {pickup.quantity}kg
+                        </p>
+                        {pickup.category_detail?.disposal_category === 'RECYCLABLE' && <RecyclableBadge className="scale-90" />}
+                      </div>
+                      {pickup.user_detail && (
+                        <p className="text-xs text-muted mt-0.5">{pickup.user_detail.full_name}</p>
+                      )}
+                    </div>
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${STATUS_STYLES[pickup.status] || 'bg-gray-100 text-secondary'}`}>
                       {pickup.status}
                     </span>
                   </div>

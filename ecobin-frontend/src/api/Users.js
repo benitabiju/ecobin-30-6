@@ -10,3 +10,14 @@ export async function getMyProfile() {
 export async function getAllUsers() {
   return authFetch('/users/');
 }
+
+export async function deleteUser(userId) {
+  return authFetch(`/users/${userId}/`, { method: 'DELETE' });
+}
+
+export async function updateMyProfile(data) {
+  return authFetch('/users/me/', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}

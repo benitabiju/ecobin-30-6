@@ -5,13 +5,17 @@ export async function getAllCollectors() {
   return authFetch('/collectors/');
 }
 
+export async function deleteCollector(collectorId) {
+  return authFetch(`/collectors/${collectorId}/`, { method: 'DELETE' });
+}
+
 // Returns pickups assigned to the logged-in collector.
 // Reuses the same /pickups/ endpoint as citizens â€” the backend's
 // get_queryset() on PickupRequestViewSet already filters by
 // assigned_collector_id when request.user.role === 'collector',
 // so no separate endpoint is needed here.
 export async function getAssignedPickups() {
-  return authFetch('/pickups/');
+  return authFetch('/pickups/', { cache: 'no-store' });
 }
 
 // Updates a pickup's status (e.g. 'collected').

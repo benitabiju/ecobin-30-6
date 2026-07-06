@@ -12,12 +12,14 @@ from .views import (
     CollectorViewSet,
     SmartBinViewSet,
     UserProfileViewSet,
-    NotificationViewSet
+    NotificationViewSet,
+    WasteCategoryViewSet
 )
 
 # 1. Set up the router and register all resource viewsets
 router = DefaultRouter()
 router.register(r'notifications', NotificationViewSet, basename='notification')
+router.register(r'categories', WasteCategoryViewSet, basename='category')
 router.register(r'pickups', PickupRequestViewSet, basename='pickup')
 router.register(r'collectors', CollectorViewSet, basename='collector')
 router.register(r'smart-bins', SmartBinViewSet, basename='smartbin')
@@ -40,5 +42,4 @@ urlpatterns = [
     
     # Password Reset & Change Endpoints
 # Password reset endpoints removed as per requirement
-    path('auth/password/change/', views.ChangePasswordView.as_view(), name='password_change'),
 ]

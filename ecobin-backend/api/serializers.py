@@ -33,7 +33,35 @@ from .models import PickupRequest, WasteCategory
 class WasteCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = WasteCategory
-        fields = ['category_id', 'category_name', 'description']
+        fields = ['category_id', 'category_name', 'description', 'icon', 'disposal_category', 'items']
+
+
+class CitizenBriefSerializer(serializers.Serializer):
+    """Lightweight citizen info embedded in pickup requests (read-only)."""
+    user_id = serializers.UUIDField()
+    full_name = serializers.CharField()
+    email = serializers.EmailField()
+    phone = serializers.CharField()
+
+
+class AssignedCollectorBriefSerializer(serializers.Serializer):
+    """Lightweight collector info embedded in pickup requests (read-only)."""
+    collector_id = serializers.UUIDField()
+    full_name = serializers.SerializerMethodField()
+    email = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    availability = serializers.CharField()
+    assigned_area = serializers.CharField()
+
+    def get_full_name(self, obj):
+        return obj.user.full_name if obj.user else ''
+
+    def get_email(self, obj):
+        return obj.user.email if obj.user else ''
+
+    def get_phone(self, obj):
+        return obj.user.phone if obj.user else ''
+
 
 class PickupRequestSerializer(serializers.ModelSerializer):
     # Automatically tracks who is logged in without prompting for the user ID in the body
@@ -41,14 +69,35 @@ class PickupRequestSerializer(serializers.ModelSerializer):
     
     # Nested representation for viewing, but accept UUID write targets
     category_detail = WasteCategorySerializer(source='category', read_only=True)
+    
+    # Rich citizen info so collectors/admins see who made the request
+    user_detail = serializers.SerializerMethodField(read_only=True)
+    
+    # Rich collector info so citizens/admins see who is assigned
+    assigned_collector_detail = AssignedCollectorBriefSerializer(
+        source='assigned_collector', read_only=True
+    )
 
     class Meta:
         model = PickupRequest
         fields = [
-            'request_id', 'user', 'bin', 'category', 'category_detail',
-            'assigned_collector', 'quantity', 'pickup_date', 'status', 'created_at'
+            'request_id', 'user', 'user_detail', 'bin', 'category', 'category_detail',
+            'assigned_collector', 'assigned_collector_detail',
+            'quantity', 'pickup_date', 'status', 
+            'address', 'latitude', 'longitude', 'created_at'
         ]
         read_only_fields = ['request_id', 'assigned_collector', 'status', 'created_at']
+
+    def get_user_detail(self, obj):
+        u = obj.user
+        if not u:
+            return None
+        return {
+            'user_id': str(u.user_id),
+            'full_name': u.full_name,
+            'email': u.email,
+            'phone': u.phone,
+        }
 
     def validate_quantity(self, value):
         if value <= 0:

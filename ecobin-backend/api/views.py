@@ -53,6 +53,16 @@ class AdminCreateStaffView(APIView):
                 address=data.get('address', ''),
                 role=target_role
             )
+            
+            # If the created staff is a collector, automatically generate their Collector profile
+            if target_role == 'collector':
+                from .models import Collector
+                Collector.objects.create(
+                    user=user,
+                    availability='available',
+                    assigned_area=data.get('address', 'Unassigned Zone')
+                )
+                
             return Response(
                 {"message": f"Staff user with role '{target_role}' created successfully."}, 
                 status=status.HTTP_201_CREATED
@@ -66,10 +76,15 @@ class AdminCreateStaffView(APIView):
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from .models import PickupRequest, Collection, Recycling, Feedback, AuditLog, Notification
-from .serializers import PickupRequestSerializer # Assuming your serializers match fields
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from .models import PickupRequest, Collection, Recycling, Feedback, AuditLog, Notification, WasteCategory
+from .serializers import PickupRequestSerializer, WasteCategorySerializer
 from .permissions import IsCollector, IsStaffOrAdmin, IsCitizen
+
+class WasteCategoryViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = WasteCategory.objects.all()
+    serializer_class = WasteCategorySerializer
+    permission_classes = [AllowAny]
 
 class PickupRequestViewSet(viewsets.ModelViewSet):
     serializer_class = PickupRequestSerializer
@@ -92,28 +107,58 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
             message=f'Your pickup request {pickup.request_id} has been submitted.'
         )
 
-    # PATCH /api/v1/pickup-requests/{id}/assign/
+    # PATCH /api/v1/pickups/{id}/assign/
     @action(detail=True, methods=['patch'], permission_classes=[IsStaffOrAdmin])
     def assign(self, request, pk=None):
+        from .models import Collector
         pickup = self.get_object()
         collector_id = request.data.get('collector_id')
-        
+
         if not collector_id:
             return Response({"error": "collector_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        pickup.assigned_collector_id = collector_id
+
+        # Validate that the collector exists
+        try:
+            collector = Collector.objects.select_related('user').get(collector_id=collector_id)
+        except Collector.DoesNotExist:
+            return Response({"error": "Collector not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Perform the assignment
+        pickup.assigned_collector = collector
         pickup.status = 'assigned'
         pickup.save()
-        
-        # Log the administrative shift to the audit log
+
+        # Notify the citizen whose request was assigned
+        Notification.objects.create(
+            user=pickup.user,
+            title='Pickup Request Assigned',
+            message=(
+                f'Your pickup request has been assigned to '
+                f'{collector.user.full_name}. They will contact you soon.'
+            )
+        )
+
+        # Notify the collector about their new assignment
+        Notification.objects.create(
+            user=collector.user,
+            title='New Pickup Assignment',
+            message=(
+                f'You have been assigned a new pickup request from '
+                f'{pickup.user.full_name} scheduled on {pickup.pickup_date}.'
+            )
+        )
+
+        # Log the administrative action to the audit log
         AuditLog.objects.create(
             user=request.user,
             action="assign_collector",
             target_entity="pickup_requests",
             target_id=str(pickup.request_id),
-            details=f"Assigned collector {collector_id}"
+            details=f"Assigned collector {collector.user.full_name} ({collector_id}) to request {pickup.request_id}"
         )
-        return Response(PickupRequestSerializer(pickup).data)
+
+        serializer = PickupRequestSerializer(pickup, context={'request': request})
+        return Response(serializer.data)
 
     # PATCH /api/v1/pickup-requests/{id}/status/
     @action(detail=True, methods=['patch'], permission_classes=[IsCollector | IsStaffOrAdmin])
@@ -140,12 +185,31 @@ class CollectorViewSet(viewsets.ModelViewSet):
     serializer_class = CollectorProfileSerializer
     permission_classes = [IsAuthenticated]
 
+    def destroy(self, request, *args, **kwargs):
+        collector_to_delete = self.get_object()
+        user_to_delete = collector_to_delete.user
+        
+        from .models import AuditLog
+        AuditLog.objects.create(
+            user=request.user,
+            action="delete_collector",
+            target_entity="collector",
+            target_id=str(collector_to_delete.collector_id),
+            details=f"Deleted collector profile and user {user_to_delete.email}"
+        )
+        
+        # Deleting the user cascades to the collector profile automatically
+        user_to_delete.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if self.request.user.role == 'admin':
+            return self.queryset
         return self.queryset.filter(user=self.request.user)
 
 # Add custom route assignment logic inside your existing PickupRequestViewSet
@@ -179,16 +243,35 @@ class SmartBinViewSet(viewsets.ModelViewSet):
     
 from .serializers import UserProfileSerializer
 
-class UserProfileViewSet(viewsets.ViewSet):
+class UserProfileViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.all()
+    serializer_class = UserProfileSerializer
     permission_classes = [IsAuthenticated]
 
-    def list(self, request):
-        if request.user.role != 'admin':
-            from rest_framework import status
-            return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
-        users = User.objects.all()
-        serializer = UserProfileSerializer(users, many=True)
-        return Response(serializer.data)
+    def get_queryset(self):
+        if self.request.user.role == 'admin':
+            return self.queryset
+        return self.queryset.filter(user_id=self.request.user.user_id)
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if self.action in ['destroy', 'create'] and request.user.role != 'admin':
+            self.permission_denied(request, message='Admin access required')
+
+    def destroy(self, request, *args, **kwargs):
+        user_to_delete = self.get_object()
+        
+        # Admin can delete user, we will just call super().destroy which uses CASCADE
+        # Wait, if we want to log it, we can create an AuditLog
+        from .models import AuditLog
+        AuditLog.objects.create(
+            user=request.user,
+            action="delete_user",
+            target_entity="user",
+            target_id=str(user_to_delete.user_id),
+            details=f"Deleted user {user_to_delete.email} ({user_to_delete.role})"
+        )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get', 'put', 'patch'], url_path='me')
     def manage_profile(self, request):
@@ -222,6 +305,8 @@ class RecyclingViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if self.request.user.role == 'admin':
+            return Recycling.objects.all()
         # Citizens can only see their own recycling records linked via collection->request->user
         return Recycling.objects.filter(collection__request__user=self.request.user)
 
@@ -249,21 +334,4 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 
-class ChangePasswordView(APIView):
-    permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        old_password = request.data.get('old_password')
-        new_password = request.data.get('new_password')
-        
-        if not old_password or not new_password:
-            return Response({"error": "Old and new passwords are required"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        user = request.user
-        if not user.check_password(old_password):
-            return Response({"error": "Incorrect old password"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        user.set_password(new_password)
-        user.save()
-        
-        return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)

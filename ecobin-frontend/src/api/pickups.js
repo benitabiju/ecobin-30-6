@@ -7,8 +7,11 @@ export async function getMyPickups() {
   return authFetch('/pickups/');
 }
 
+const API_BASE = 'http://127.0.0.1:8000/api/v1';
+
 export async function getCategories() {
-  return authFetch('/categories/');
+  const response = await fetch(`${API_BASE}/categories/`);
+  return response.json();
 }
 
 export async function createPickupRequest(data) {
