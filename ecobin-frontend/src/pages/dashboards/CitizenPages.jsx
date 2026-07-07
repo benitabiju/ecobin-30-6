@@ -1,22 +1,153 @@
 import React, { useEffect, useState } from 'react';
 import { getMyProfile } from '../../api/Users';
-import { Bell, MapPin, User, Truck } from 'lucide-react';
+import { Bell, MapPin, User, Truck, Star, AlertTriangle, CheckCircle2, Home, Sparkles } from 'lucide-react';
 import { getNotifications } from '../../api/notifications';
-import { getMyPickups, uploadCitizenProof } from '../../api/pickups';
+import { getMyPickups, uploadCitizenProof, submitPickupFeedback } from '../../api/pickups';
+import { getMyCompoundCleanups } from '../../api/cleanups';
 import { UploadCloud, X } from 'lucide-react';
 import { ImageGallery } from '../../components/ImageGallery';
 import RecyclableBadge from '../../components/RecyclableBadge';
 
 const STATUS_STYLES = {
-  pending:   { cls: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Pending Assignment' },
-  assigned:  { cls: 'bg-blue-100 text-blue-800 border-blue-200',   label: 'Assigned' },
-  pending_citizen_verification: { cls: 'bg-orange-100 text-orange-800 border-orange-200', label: 'Pending Citizen Verify' },
-  pending_admin_verification: { cls: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Pending Admin Verify' },
-  collected: { cls: 'bg-purple-100 text-purple-800 border-purple-200', label: 'Collected' },
-  completed: { cls: 'bg-green-100 text-green-800 border-green-200', label: 'Completed' },
-  recycled:  { cls: 'bg-green-100 text-green-800 border-green-200', label: 'Recycled' },
-  cancelled: { cls: 'bg-red-100 text-red-800 border-red-200',      label: 'Cancelled' },
+  pending_assignment: { cls: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Pending Assignment' },
+  pending_review:     { cls: 'bg-amber-100 text-amber-800 border-amber-200',    label: 'Pending Review' },
+  approved:           { cls: 'bg-sky-100 text-sky-800 border-sky-200',          label: 'Approved' },
+  assigned:           { cls: 'bg-blue-100 text-blue-800 border-blue-200',       label: 'Assigned' },
+  in_progress:        { cls: 'bg-indigo-100 text-indigo-800 border-indigo-200', label: 'In Progress' },
+  pending_verification:{ cls: 'bg-orange-100 text-orange-800 border-orange-200',label: 'Pending Verification' },
+  completion_rejected:{ cls: 'bg-red-100 text-red-800 border-red-200',         label: 'Completion Rejected' },
+  completed:          { cls: 'bg-green-100 text-green-800 border-green-200',    label: 'Completed' },
+  cancelled:          { cls: 'bg-gray-100 text-gray-600 border-gray-200',       label: 'Cancelled' },
+  rejected:           { cls: 'bg-red-100 text-red-600 border-red-200',          label: 'Rejected' },
 };
+
+// ── Rule 5: Star Rating Input Component ──
+const StarRating = ({ value, onChange }) => (
+  <div className="flex gap-1">
+    {[1, 2, 3, 4, 5].map(star => (
+      <button
+        key={star}
+        type="button"
+        onClick={() => onChange(star)}
+        className="focus:outline-none"
+        aria-label={`${star} star${star !== 1 ? 's' : ''}`}
+      >
+        <Star
+          className={`w-8 h-8 transition-colors ${
+            star <= value ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300 dark:text-gray-600'
+          }`}
+        />
+      </button>
+    ))}
+  </div>
+);
+
+// ── Rule 5: Rating Modal ──
+const RatingModal = ({ pickup, onSuccess, onClose }) => {
+  const [rating, setRating] = useState(0);
+  const [comments, setComments] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (rating === 0) return setError('Please select a star rating.');
+    if (!comments.trim()) return setError('Please add a comment.');
+    setSubmitting(true);
+    setError('');
+    try {
+      await submitPickupFeedback(pickup.request_id, { rating, comments });
+      onSuccess();
+    } catch (err) {
+      setError(err.message || 'Failed to submit feedback.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="card-modern p-8 w-full max-w-md animate-fade-in-up">
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 bg-yellow-50 rounded-full flex items-center justify-center mx-auto mb-3">
+            <Star className="w-8 h-8 text-yellow-400 fill-yellow-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-primary mb-1">Rate Your Collector</h2>
+          <p className="text-sm text-secondary">
+            Your pickup <span className="font-semibold">{pickup.category_detail?.category_name}</span> is complete.
+            Rate your experience to unlock new requests.
+          </p>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">
+              Rating
+            </label>
+            <StarRating value={rating} onChange={setRating} />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">
+              Your Feedback <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={comments}
+              onChange={e => setComments(e.target.value)}
+              className="input-modern min-h-[100px] resize-none"
+              placeholder="How was the collection? Was the collector professional?"
+              required
+            />
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="flex-1 py-2.5 font-bold text-secondary bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+            >
+              Skip for Now
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || rating === 0}
+              className="flex-1 py-2.5 font-bold text-white bg-[#387478] hover:bg-[#2d5f62] rounded-xl shadow-md transition-colors disabled:opacity-50"
+            >
+              {submitting ? 'Submitting…' : 'Submit Rating'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// ── Rule 5: Rating Gate Banner ──
+const RatingGateBanner = ({ pendingPickup, onRate }) => (
+  <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-3 shadow-sm">
+    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+    <div className="flex-1">
+      <p className="font-bold text-amber-800 text-sm">Rating Required Before New Request</p>
+      <p className="text-amber-700 text-xs mt-0.5">
+        Please rate your last completed collection (<span className="font-semibold">{pendingPickup?.category_detail?.category_name}</span>) before submitting a new pickup request.
+      </p>
+    </div>
+    <button
+      onClick={onRate}
+      className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors shrink-0"
+    >
+      Rate Now
+    </button>
+  </div>
+);
 
 export const CitizenRequests = () => {
   const [pickups, setPickups] = useState([]);
@@ -29,30 +160,38 @@ export const CitizenRequests = () => {
   const [verifyImages, setVerifyImages] = useState([]);
   const [uploadingVerify, setUploadingVerify] = useState(false);
 
+  // Rule 5: Rating modal
+  const [ratingPickup, setRatingPickup] = useState(null);
+
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const data = await getMyPickups();
-        setPickups(Array.isArray(data) ? data : data.results || []);
-      } catch (err) {
-        setError(err.message || 'Failed to load requests');
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
+    loadPickups();
   }, []);
 
   const loadPickups = async () => {
     try {
       const data = await getMyPickups();
-      setPickups(Array.isArray(data) ? data : data.results || []);
-    } catch (err) {}
+      const all = Array.isArray(data) ? data : data.results || [];
+      setPickups(all);
+    } catch (err) {
+      setError(err.message || 'Failed to load requests');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // The pickup that needs a rating (if any)
+  const pendingRatingPickup = pickups.find(p => p.pending_rating === true);
+
+  const handleRatingSuccess = async () => {
+    setRatingPickup(null);
+    setSuccessMessage('Thank you for your feedback! You can now submit new requests.');
+    setTimeout(() => setSuccessMessage(''), 4000);
+    await loadPickups();
   };
 
   const handleVerifySubmit = async (e) => {
     e.preventDefault();
-    if (verifyImages.length === 0) return setError("Please upload at least one image");
+    if (verifyImages.length === 0) return setError('Please upload at least one image');
     
     setUploadingVerify(true);
     setError('');
@@ -76,26 +215,38 @@ export const CitizenRequests = () => {
     }
   };
 
-  if (loading) {
-    return <p className="text-sm text-muted">Loading requests...</p>;
-  }
-  if (error) {
-    return <p className="text-sm text-red-600 dark:text-red-400">{error}</p>;
-  }
+  if (loading) return <p className="text-sm text-muted">Loading requests…</p>;
+
   const filteredPickups = pickups.filter(p => {
     if (filter === 'active') {
-      return ['submitted', 'pending_review', 'assigned', 'pending_citizen_verification', 'pending_admin_verification'].includes(p.status);
+      return ['pending_assignment', 'pending_review', 'approved', 'assigned', 'in_progress', 'pending_verification', 'completion_rejected'].includes(p.status);
     }
-    return ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status);
+    return ['completed', 'cancelled', 'rejected'].includes(p.status);
   });
 
   return (
     <div className="space-y-4">
+      {/* Toast messages */}
       {successMessage && (
-        <div className="p-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg">
+        <div className="p-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
           {successMessage}
         </div>
       )}
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 text-red-600 text-sm rounded-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Rule 5: Rating Gate Banner */}
+      {pendingRatingPickup && (
+        <RatingGateBanner
+          pendingPickup={pendingRatingPickup}
+          onRate={() => setRatingPickup(pendingRatingPickup)}
+        />
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
         <div>
           <h2 className="text-2xl font-extrabold text-primary">My Pickup Requests</h2>
@@ -106,13 +257,13 @@ export const CitizenRequests = () => {
             onClick={() => setFilter('active')}
             className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'active' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
           >
-            Active ({pickups.filter(p => ['submitted', 'pending_review', 'assigned', 'pending_citizen_verification', 'pending_admin_verification'].includes(p.status)).length})
+            Active ({pickups.filter(p => ['pending_assignment','pending_review','approved','assigned','in_progress','pending_verification','completion_rejected'].includes(p.status)).length})
           </button>
           <button 
             onClick={() => setFilter('history')}
             className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'history' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
           >
-            History ({pickups.filter(p => ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status)).length})
+            History ({pickups.filter(p => ['completed','cancelled','rejected'].includes(p.status)).length})
           </button>
         </div>
       </div>
@@ -126,17 +277,23 @@ export const CitizenRequests = () => {
         const statusInfo = STATUS_STYLES[p.status] || { cls: 'bg-gray-100 text-gray-700 border-gray-200', label: p.status };
         const collector = p.assigned_collector_detail;
         return (
-          <div key={p.request_id} className="card-modern p-5 hover:border-eco-emerald/50 transition-all">
+          <div key={p.request_id} className={`card-modern p-5 transition-all ${p.pending_rating ? 'border-amber-300 ring-1 ring-amber-200' : 'hover:border-eco-emerald/50'}`}>
             {/* Header row */}
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="flex items-center gap-2">
-                <p className="font-bold text-[#0E1240] text-primary text-lg">
-                  {p.category_detail?.category_name || 'Pickup Request'}
-                </p>
-                {p.category_detail?.disposal_category === 'RECYCLABLE' && <RecyclableBadge />}
-              </div>
-              <p className="text-sm text-muted mt-1 font-medium">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="font-bold text-[#0E1240] text-primary text-lg">
+                    {p.category_detail?.category_name || 'Pickup Request'}
+                  </p>
+                  {p.category_detail?.disposal_category === 'RECYCLABLE' && <RecyclableBadge />}
+                  {p.pending_rating && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200">
+                      <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                      Rating Pending
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-muted mt-1 font-medium">
                   {p.quantity} kg · Scheduled {p.pickup_date}
                 </p>
               </div>
@@ -151,6 +308,7 @@ export const CitizenRequests = () => {
                 <MapPin className="w-4 h-4 text-muted shrink-0 mt-0.5" />
                 <div>
                   {p.address && <span>{p.address}</span>}
+                  {p.street && <span className="ml-2 text-xs text-muted">({p.street})</span>}
                   {p.latitude && p.longitude && (
                     <a
                       href={`https://www.google.com/maps?q=${p.latitude},${p.longitude}`}
@@ -165,7 +323,7 @@ export const CitizenRequests = () => {
               </div>
             )}
 
-            {/* Assigned Collector (shown when assigned) */}
+            {/* Assigned Collector */}
             {collector && (
               <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-[#E2F1E7] flex items-center justify-center text-[#243642] font-bold text-sm shrink-0">
@@ -190,18 +348,24 @@ export const CitizenRequests = () => {
               </div>
             )}
 
-            {/* Pending — no collector yet */}
-            {!collector && p.status === 'pending' && (
-              <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 text-xs text-muted">
-                <User className="w-4 h-4" />
-                Awaiting collector assignment by admin
-              </div>
-            )}
-            
-            {p.status === 'pending_citizen_verification' && (
+            {/* Pending verification action */}
+            {p.status === 'pending_verification' && (
               <div className="mt-3 pt-3 border-t border-gray-100">
                 <button onClick={() => setVerifyingPickup(p)} className="w-full py-2 bg-eco-emerald text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition-colors">
                   Verify Pickup Completion
+                </button>
+              </div>
+            )}
+
+            {/* Rule 5: Rate completed pickup */}
+            {p.status === 'completed' && p.pending_rating && (
+              <div className="mt-3 pt-3 border-t border-amber-100">
+                <button
+                  onClick={() => setRatingPickup(p)}
+                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-bold transition-colors flex items-center justify-center gap-2"
+                >
+                  <Star className="w-4 h-4 fill-white" />
+                  Rate This Collection to Unlock New Requests
                 </button>
               </div>
             )}
@@ -247,18 +411,100 @@ export const CitizenRequests = () => {
               <div className="flex gap-3 pt-4 border-t border-gray-100">
                 <button type="button" onClick={() => setVerifyingPickup(null)} className="flex-1 py-2 text-secondary bg-gray-100 hover:bg-gray-200 font-bold rounded-xl transition-colors">Cancel</button>
                 <button type="submit" disabled={uploadingVerify || verifyImages.length === 0} className="flex-1 py-2 bg-[#C9742B] text-white hover:bg-[#b06323] font-bold rounded-xl shadow-md transition-colors disabled:opacity-50">
-                  {uploadingVerify ? 'Uploading...' : 'Verify Now'}
+                  {uploadingVerify ? 'Uploading…' : 'Verify Now'}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      {/* Rule 5: Rating Modal */}
+      {ratingPickup && (
+        <RatingModal
+          pickup={ratingPickup}
+          onSuccess={handleRatingSuccess}
+          onClose={() => setRatingPickup(null)}
+        />
+      )}
     </div>
   );
 };
 
-// Keep other placeholder pages simple
+// ── Rule 1: Compound Cleanup Status Panel ──
+export const CitizenCleanupStatus = () => {
+  const [cleanups, setCleanups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    getMyCompoundCleanups()
+      .then(data => setCleanups(Array.isArray(data) ? data : data.results || []))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const statusColor = {
+    pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    in_progress: 'bg-blue-100 text-blue-800 border-blue-200',
+    completed: 'bg-green-100 text-green-800 border-green-200',
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-extrabold text-primary">Compound Cleanups</h2>
+        <p className="text-sm text-secondary mt-1">Scheduled cleanups for your premises (triggered when you submit 10+ requests).</p>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : error ? (
+        <p className="text-sm text-red-500">{error}</p>
+      ) : cleanups.length === 0 ? (
+        <div className="p-10 card-modern text-center">
+          <Home size={40} className="mx-auto text-muted opacity-40 mb-3" />
+          <p className="text-sm text-muted font-medium">No compound cleanups yet.</p>
+          <p className="text-xs text-muted mt-1">A cleanup will be scheduled automatically when you submit 10+ pickup requests.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {cleanups.map(c => (
+            <div key={c.compound_cleanup_id} className="card-modern p-5">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-[#E2F1E7] rounded-lg">
+                    <Sparkles className="w-5 h-5 text-[#387478]" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-primary">Compound Cleanup</p>
+                    <p className="text-xs text-muted">Triggered {new Date(c.triggered_at).toLocaleDateString()} · {c.trigger_request_count} requests</p>
+                  </div>
+                </div>
+                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${statusColor[c.status] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                  {c.status.replace('_', ' ')}
+                </span>
+              </div>
+              {c.assigned_collector_name && (
+                <p className="text-xs text-secondary mt-3 pt-3 border-t border-gray-100">
+                  Assigned to: <span className="font-semibold">{c.assigned_collector_name}</span>
+                </p>
+              )}
+              {c.completed_at && (
+                <p className="text-xs text-green-600 mt-1">
+                  ✅ Completed on {new Date(c.completed_at).toLocaleDateString()}
+                </p>
+              )}
+              {c.notes && <p className="text-xs text-muted italic mt-1">{c.notes}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Keep other pages simple
 export const CitizenBins = () => (
  <div className="p-8 card-modern">
  <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-4">Nearby Bins</h2>
@@ -289,6 +535,7 @@ export const CitizenBins = () => (
  </div>
  </div>
 );
+
 export const CitizenRecycling = () => {
  const mockRecords = [
  { id: 1, recycling_center: 'GreenEarth Center', recycled_weight: 15.5, recycled_date: '2026-06-15' },
@@ -321,16 +568,52 @@ export const CitizenRecycling = () => {
  </div>
  );
 };
-export const CitizenFeedback = () => (
- <div className="p-8 card-modern">
- <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-4">Feedback</h2>
- <p className="text-sm text-secondary mb-4">We value your thoughts. Share suggestions or report issues.</p>
- <form className="space-y-4">
- <textarea className="input-modern" rows={5} placeholder="Your feedback..." required />
- <button type="submit" className="btn-primary">Submit</button>
- </form>
- </div>
-);
+
+export const CitizenFeedback = () => {
+  const [pickups, setPickups] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getMyPickups()
+      .then(data => setPickups(Array.isArray(data) ? data : data.results || []))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const ratedPickups = pickups.filter(p => p.status === 'completed' && !p.pending_rating);
+  const pendingPickups = pickups.filter(p => p.pending_rating);
+
+  return (
+    <div className="p-8 card-modern space-y-4">
+      <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-2">My Feedback</h2>
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : (
+        <>
+          {pendingPickups.length > 0 && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-sm font-bold text-amber-800">⚠ Pending Ratings ({pendingPickups.length})</p>
+              <p className="text-xs text-amber-700 mt-1">Go to "My Requests" tab to rate these collections.</p>
+            </div>
+          )}
+          {ratedPickups.length === 0 ? (
+            <p className="text-sm text-secondary">No submitted feedback yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {ratedPickups.map(p => (
+                <li key={p.request_id} className="p-4 card-modern border-eco-sage/10">
+                  <p className="font-medium text-primary text-sm">{p.category_detail?.category_name}</p>
+                  <p className="text-xs text-muted mt-0.5">Completed {p.pickup_date}</p>
+                  <p className="text-xs text-green-600 mt-1 font-medium">✅ Feedback submitted</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 export const CitizenNotifications = () => {
  const [notifications, setNotifications] = useState([]);
  const [loading, setLoading] = useState(true);
@@ -363,8 +646,9 @@ export const CitizenNotifications = () => {
  ) : (
  <ul className="w-full max-w-2xl space-y-3">
  {notifications.map((n) => (
- <li key={n.id} className="p-5 card-modern border-eco-sage/20 shadow-inner">
- <p className="text-sm text-secondary dark:text-gray-200">{n.message || 'No message'}</p>
+ <li key={n.notification_id || n.id} className="p-5 card-modern border-eco-sage/20 shadow-inner">
+ <p className="text-sm font-semibold text-primary">{n.title}</p>
+ <p className="text-sm text-secondary dark:text-gray-200 mt-0.5">{n.message || 'No message'}</p>
  <p className="text-xs text-muted mt-1">{new Date(n.created_at).toLocaleString()}</p>
  </li>
  ))}
@@ -373,6 +657,7 @@ export const CitizenNotifications = () => {
  </div>
  );
 };
+
 export const CitizenProfile = () => {
  const [profile, setProfile] = useState(null);
  const [loading, setLoading] = useState(true);

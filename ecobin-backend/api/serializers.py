@@ -106,12 +106,13 @@ class PickupRequestSerializer(serializers.ModelSerializer):
         fields = [
             'request_id', 'user', 'user_detail', 'bin', 'category', 'category_detail',
             'assigned_collector', 'assigned_collector_detail',
-            'quantity', 'pickup_date', 'status', 
-            'address', 'landmark', 'description', 'rejection_reason',
+            'quantity', 'pickup_date', 'status',
+            'address', 'street', 'landmark', 'description', 'rejection_reason',
             'latitude', 'longitude', 'created_at', 'images',
-            'collector_completed_at', 'completed_by', 'completion_note'
+            'collector_completed_at', 'completed_by', 'completion_note',
+            'pending_rating',
         ]
-        read_only_fields = ['request_id', 'assigned_collector', 'status', 'created_at']
+        read_only_fields = ['request_id', 'assigned_collector', 'status', 'created_at', 'pending_rating']
 
     def get_user_detail(self, obj):
         u = obj.user
@@ -137,8 +138,19 @@ class CollectorProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Collector
-        fields = ['collector_id', 'email', 'full_name', 'vehicle_number', 'assigned_area', 'availability']
-        read_only_fields = ['collector_id']
+        fields = [
+            'collector_id', 'email', 'full_name', 'vehicle_number', 'assigned_area', 'availability',
+            # Rule 3, 4, 5 — bonus & performance fields
+            'points', 'ratings_count', 'bonus_amount',
+            'total_recyclable_collections', 'compound_cleanups_this_cycle', 'street_cleanups_this_cycle',
+            'bonus_cycles_completed', 'increment_qualified',
+        ]
+        read_only_fields = [
+            'collector_id',
+            'points', 'ratings_count', 'bonus_amount',
+            'total_recyclable_collections', 'compound_cleanups_this_cycle', 'street_cleanups_this_cycle',
+            'bonus_cycles_completed', 'increment_qualified',
+        ]
 
 class UpdatePickupStatusSerializer(serializers.Serializer):
     # Used when an action takes place on a request
@@ -158,7 +170,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ['user_id', 'email', 'role', 'created_at']
 
 from rest_framework import serializers
-from .models import Notification, Collection, Recycling, Feedback, AuditLog, PasswordResetToken
+from .models import Notification, Collection, Recycling, Feedback, AuditLog, PasswordResetToken, CompoundCleanup, StreetCleanup
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -181,15 +193,27 @@ class RecyclingSerializer(serializers.ModelSerializer):
         fields = ['recycling_id', 'collection', 'recycled_weight', 'recycling_center', 'recycled_date']
         read_only_fields = ['recycling_id']
 
+
+# --- Rule 5: Feedback Serializer (now linked to PickupRequest) ---
 class FeedbackSerializer(serializers.ModelSerializer):
     class Meta:
         model = Feedback
-        fields = '__all__'
+        fields = ['feedback_id', 'user', 'request', 'collection', 'rating', 'comments', 'submitted_at']
+        read_only_fields = ['feedback_id', 'submitted_at']
         
     def validate_rating(self, value):
         if value < 1 or value > 5:
             raise serializers.ValidationError("Rating must be an integer between 1 and 5.")
         return value
+
+    def validate(self, data):
+        request_obj = data.get('request')
+        user = data.get('user')
+        if request_obj and user:
+            if Feedback.objects.filter(user=user, request=request_obj).exists():
+                raise serializers.ValidationError("You have already submitted feedback for this pickup.")
+        return data
+
 
 class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
@@ -201,3 +225,49 @@ class PasswordResetTokenSerializer(serializers.ModelSerializer):
     class Meta:
         model = PasswordResetToken
         fields = '__all__'
+
+
+# --- Rule 1: Compound Cleanup Serializer ---
+class CompoundCleanupSerializer(serializers.ModelSerializer):
+    citizen_name = serializers.SerializerMethodField(read_only=True)
+    citizen_email = serializers.SerializerMethodField(read_only=True)
+    assigned_collector_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = CompoundCleanup
+        fields = [
+            'compound_cleanup_id', 'citizen', 'citizen_name', 'citizen_email',
+            'assigned_collector', 'assigned_collector_name',
+            'triggered_at', 'completed_at', 'status', 'notes', 'trigger_request_count',
+        ]
+        read_only_fields = ['compound_cleanup_id', 'triggered_at', 'trigger_request_count']
+
+    def get_citizen_name(self, obj):
+        return obj.citizen.full_name if obj.citizen else None
+
+    def get_citizen_email(self, obj):
+        return obj.citizen.email if obj.citizen else None
+
+    def get_assigned_collector_name(self, obj):
+        if obj.assigned_collector and obj.assigned_collector.user:
+            return obj.assigned_collector.user.full_name
+        return None
+
+
+# --- Rule 2: Street Cleanup Serializer ---
+class StreetCleanupSerializer(serializers.ModelSerializer):
+    assigned_collector_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = StreetCleanup
+        fields = [
+            'street_cleanup_id', 'street',
+            'assigned_collector', 'assigned_collector_name',
+            'triggered_at', 'completed_at', 'status', 'notes', 'trigger_request_count',
+        ]
+        read_only_fields = ['street_cleanup_id', 'triggered_at', 'trigger_request_count']
+
+    def get_assigned_collector_name(self, obj):
+        if obj.assigned_collector and obj.assigned_collector.user:
+            return obj.assigned_collector.user.full_name
+        return None

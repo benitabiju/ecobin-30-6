@@ -1,5 +1,5 @@
 from rest_framework.decorators import action
-from rest_framework import status
+from rest_framework import status, viewsets
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -77,14 +77,24 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .models import PickupRequest, Collection, Recycling, Feedback, AuditLog, Notification, WasteCategory
-from .serializers import PickupRequestSerializer, WasteCategorySerializer
+from .models import (
+    PickupRequest, Collection, Recycling, Feedback, AuditLog,
+    Notification, WasteCategory, CompoundCleanup, StreetCleanup
+)
+from .serializers import (
+    PickupRequestSerializer, WasteCategorySerializer,
+    CompoundCleanupSerializer, StreetCleanupSerializer,
+    FeedbackSerializer,
+)
 from .permissions import IsCollector, IsStaffOrAdmin, IsCitizen
+from . import services
+
 
 class WasteCategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = WasteCategory.objects.all()
     serializer_class = WasteCategorySerializer
     permission_classes = [AllowAny]
+
 
 class PickupRequestViewSet(viewsets.ModelViewSet):
     serializer_class = PickupRequestSerializer
@@ -99,7 +109,20 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         return PickupRequest.objects.all()
 
     def perform_create(self, serializer):
-        pickup = serializer.save(user=self.request.user)
+        user = self.request.user
+
+        # ── Rule 5: Gate — citizen must rate before submitting new requests ──
+        if user.role == 'citizen':
+            pending_rating_exists = PickupRequest.objects.filter(
+                user=user, pending_rating=True
+            ).exists()
+            if pending_rating_exists:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied(
+                    "You must rate your last completed collection before submitting a new pickup request."
+                )
+
+        pickup = serializer.save(user=user)
         
         # Save citizen images
         images = self.request.FILES.getlist('images')
@@ -112,15 +135,22 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
                 request=pickup,
                 image=image,
                 image_type='citizen_upload',
-                uploader=self.request.user
+                uploader=user
             )
             
-        # Create a notification for the citizen who submitted the pickup request
+        # Notify citizen
         Notification.objects.create(
-            user=self.request.user,
+            user=user,
             title='Pickup Request Submitted',
             message=f'Your pickup request {pickup.request_id} has been submitted and is pending admin review.'
         )
+
+        # ── Rule 1: Compound Cleanup Trigger ──
+        services.check_compound_cleanup_trigger(user)
+
+        # ── Rule 2: Street Cleanup Trigger ──
+        if pickup.street:
+            services.check_street_cleanup_trigger(pickup.street)
 
     # PATCH /api/v1/pickups/{id}/assign/
     @action(detail=True, methods=['patch'], permission_classes=[IsStaffOrAdmin])
@@ -197,6 +227,7 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         Notification.objects.create(user=pickup.user, title='Request Rejected', message=f'Your pickup request was rejected. Reason: {reason}')
         return Response(PickupRequestSerializer(pickup, context={'request': request}).data)
 
+    # ── Rule 6: Collector proof upload (collector ONLY) ──
     @action(detail=True, methods=['post'], permission_classes=[IsCollector])
     def upload_proof(self, request, pk=None):
         pickup = self.get_object()
@@ -237,15 +268,28 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
             }
         )
         
-        Notification.objects.create(user=pickup.user, title='Action Required: Verify Pickup', message='The collector has marked your pickup as completed. Please upload a verification photo to confirm.')
+        Notification.objects.create(
+            user=pickup.user,
+            title='Action Required: Verify Pickup',
+            message='The collector has marked your pickup as completed. Please upload a verification photo to confirm.'
+        )
         return Response(PickupRequestSerializer(pickup, context={'request': request}).data)
-        
+
+    # ── Rule 6: Citizen verification photo upload (citizen ONLY) ──
     @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
     def citizen_verify(self, request, pk=None):
         pickup = self.get_object()
         
+        # Enforce citizen ownership
         if pickup.user != request.user:
             return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
+        # Enforce citizen role — collectors cannot use this endpoint
+        if request.user.role != 'citizen':
+            return Response(
+                {"error": "Only citizens can upload verification photos."},
+                status=status.HTTP_403_FORBIDDEN
+            )
             
         if pickup.status != 'pending_verification':
             return Response({"error": "Pickup is not pending verification"}, status=status.HTTP_400_BAD_REQUEST)
@@ -269,13 +313,17 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         # Leave status as pending_verification
         pickup.save()
         
-        Notification.objects.create(user=pickup.user, title='Pickup Pending Admin Verification', message='Your verification has been submitted and is pending final admin approval.')
+        Notification.objects.create(
+            user=pickup.user,
+            title='Pickup Pending Admin Verification',
+            message='Your verification has been submitted and is pending final admin approval.'
+        )
         return Response(PickupRequestSerializer(pickup, context={'request': request}).data)
         
     @action(detail=True, methods=['post'], permission_classes=[IsStaffOrAdmin])
     def verify(self, request, pk=None):
         pickup = self.get_object()
-        action_type = request.data.get('action') # 'approve' or 'reject'
+        action_type = request.data.get('action')  # 'approve' or 'reject'
         reason = request.data.get('reason', '')
         
         if action_type == 'approve':
@@ -293,25 +341,50 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
                     can_approve = True
                     
             if not can_approve:
-                return Response({"error": "Cannot complete: Pending citizen verification and 72-hour auto-completion window has not elapsed."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"error": "Cannot complete: Pending citizen verification and 72-hour auto-completion window has not elapsed."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
             pickup.status = 'completed'
+            # ── Rule 5: Set pending_rating so citizen must rate before next request ──
+            pickup.pending_rating = True
             pickup.save()
-            Notification.objects.create(user=pickup.user, title='Pickup Completed', message='Your pickup has been verified and completed.')
+
+            Notification.objects.create(
+                user=pickup.user,
+                title='Pickup Completed ✅',
+                message=(
+                    'Your pickup has been verified and completed. '
+                    'Please rate your collector to unlock your next pickup request.'
+                )
+            )
             if pickup.assigned_collector:
-                Notification.objects.create(user=pickup.assigned_collector.user, title='Completion Verified', message=f'Your collection for {pickup.request_id} was verified.')
-            
+                Notification.objects.create(
+                    user=pickup.assigned_collector.user,
+                    title='Completion Verified',
+                    message=f'Your collection for {pickup.request_id} was verified.'
+                )
+
+            # ── Rule 3: If RECYCLABLE, increment recyclable counter and check bonus ──
+            if pickup.category.disposal_category == 'RECYCLABLE' and pickup.assigned_collector:
+                from django.db.models import F
+                from .models import Collector
+                Collector.objects.filter(pk=pickup.assigned_collector.pk).update(
+                    total_recyclable_collections=F('total_recyclable_collections') + 1
+                )
+                pickup.assigned_collector.refresh_from_db()
+                services.check_bonus_cycle(pickup.assigned_collector)
+
             # Create Recycling record if category is RECYCLABLE
             if pickup.category.disposal_category == 'RECYCLABLE':
                 from .models import Collection, Recycling
                 collection_obj = Collection.objects.filter(request=pickup).first()
                 if collection_obj:
-                    # check if recycling record already exists
                     Recycling.objects.get_or_create(
                         collection=collection_obj,
                         defaults={
                             'recycled_weight': collection_obj.collected_weight,
-                            'status': 'processing',
                             'recycling_center': 'Central Recycling Facility',
                             'recycled_date': timezone.now().date()
                         }
@@ -322,18 +395,18 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
             pickup.status = 'completion_rejected'
             pickup.rejection_reason = reason
             pickup.save()
-            Notification.objects.create(user=pickup.user, title='Completion Rejected', message=f'Your verification was rejected. Reason: {reason}')
+            Notification.objects.create(
+                user=pickup.user,
+                title='Completion Rejected',
+                message=f'Your verification was rejected. Reason: {reason}'
+            )
             return Response({"status": "completion rejected"})
             
         return Response({"error": "Invalid action"}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=['post'], permission_classes=[IsStaffOrAdmin])
     def trigger_auto_complete(self, request):
-        from django.utils import timezone
-        from datetime import timedelta
         from django.core.management import call_command
-        
-        # Trigger the management command logic
         try:
             call_command('auto_complete_requests')
             return Response({"status": "Auto-completion triggered successfully"})
@@ -352,7 +425,77 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         pickup.status = new_status
         pickup.save()
         return Response(PickupRequestSerializer(pickup).data)
-    
+
+    # ── Rule 5: Submit feedback & rating after collection ──
+    @action(detail=True, methods=['post'], permission_classes=[IsCitizen])
+    def submit_feedback(self, request, pk=None):
+        """
+        Citizen submits rating + feedback for a completed pickup.
+        Clears the pending_rating gate so they can submit new requests.
+        Updates collector points.
+        """
+        pickup = self.get_object()
+
+        # Authorization: only the pickup's owner
+        if pickup.user != request.user:
+            return Response({"error": "Not authorized"}, status=status.HTTP_403_FORBIDDEN)
+
+        # State guard: can only rate completed pickups with pending_rating
+        if pickup.status != 'completed':
+            return Response(
+                {"error": "Can only submit feedback for completed pickups."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not pickup.pending_rating:
+            return Response(
+                {"error": "Feedback has already been submitted for this pickup."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate input
+        rating = request.data.get('rating')
+        comments = request.data.get('comments', '')
+
+        if rating is None:
+            return Response({"error": "rating is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            rating = int(rating)
+        except (TypeError, ValueError):
+            return Response({"error": "rating must be an integer."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not (1 <= rating <= 5):
+            return Response({"error": "Rating must be between 1 and 5."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not comments.strip():
+            return Response({"error": "Please provide feedback comments."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Prevent duplicate feedback
+        if Feedback.objects.filter(user=request.user, request=pickup).exists():
+            return Response(
+                {"error": "You have already submitted feedback for this pickup."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create feedback record
+        Feedback.objects.create(
+            user=request.user,
+            request=pickup,
+            rating=rating,
+            comments=comments
+        )
+
+        # Clear the rating gate
+        pickup.pending_rating = False
+        pickup.save(update_fields=['pending_rating'])
+
+        # Update collector points (Rule 5)
+        if pickup.assigned_collector:
+            services.update_collector_points(pickup.assigned_collector, rating)
+
+        return Response({"status": "Feedback submitted successfully. You may now submit new pickup requests."})
+
 
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -389,6 +532,7 @@ class CollectorViewSet(viewsets.ModelViewSet):
         user_to_delete.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+
 class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
@@ -399,8 +543,6 @@ class NotificationViewSet(viewsets.ModelViewSet):
             return self.queryset
         return self.queryset.filter(user=self.request.user)
 
-# Add custom route assignment logic inside your existing PickupRequestViewSet
-# Update your existing PickupRequestViewSet class to include these actions:
 
 from .models import SmartBin
 from .serializers import SmartBinSerializer
@@ -427,6 +569,7 @@ class SmartBinViewSet(viewsets.ModelViewSet):
             
         bin_instance.save()
         return Response({"status": "Fill level updated", "current_fill_level": bin_instance.fill_level})
+
     
 from .serializers import UserProfileSerializer
 
@@ -448,8 +591,6 @@ class UserProfileViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         user_to_delete = self.get_object()
         
-        # Admin can delete user, we will just call super().destroy which uses CASCADE
-        # Wait, if we want to log it, we can create an AuditLog
         from .models import AuditLog
         AuditLog.objects.create(
             user=request.user,
@@ -473,8 +614,6 @@ class UserProfileViewSet(viewsets.ModelViewSet):
                 serializer.save()
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
 
 
 from .serializers import CollectionSerializer, RecyclingSerializer, FeedbackSerializer, AuditLogSerializer
@@ -505,10 +644,16 @@ class RecyclingViewSet(viewsets.ModelViewSet):
             raise serializers.ValidationError('Cannot create recycling for another user')
         serializer.save()
 
+
 class FeedbackViewSet(viewsets.ModelViewSet):
     queryset = Feedback.objects.all()
     serializer_class = FeedbackSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        if self.request.user.role == 'admin':
+            return self.queryset
+        return self.queryset.filter(user=self.request.user)
 
 class AuditLogViewSet(viewsets.ReadOnlyModelViewSet): 
     queryset = AuditLog.objects.all().order_by('-created_at')
@@ -516,9 +661,73 @@ class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAdminUserRole]
 
 
+# ── Rule 1: Compound Cleanup ViewSet ──
+class CompoundCleanupViewSet(viewsets.ModelViewSet):
+    """
+    Admin can list, update status, and assign collectors for compound cleanups.
+    Citizens can view their own compound cleanups.
+    """
+    serializer_class = CompoundCleanupSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.role == 'admin':
+            return CompoundCleanup.objects.all().order_by('-triggered_at')
+        # Citizens see only their own
+        return CompoundCleanup.objects.filter(citizen=user).order_by('-triggered_at')
+
+    def perform_update(self, serializer):
+        # Detect status change to 'completed'
+        old_status = self.get_object().status
+        instance = serializer.save()
+
+        # ── Rule 3: When admin completes a compound cleanup, credit the assigned collector ──
+        if old_status != 'completed' and instance.status == 'completed':
+            from django.utils import timezone
+            from django.db.models import F
+            instance.completed_at = timezone.now()
+            instance.save(update_fields=['completed_at'])
+
+            if instance.assigned_collector:
+                Collector.objects.filter(pk=instance.assigned_collector.pk).update(
+                    compound_cleanups_this_cycle=F('compound_cleanups_this_cycle') + 1
+                )
+                instance.assigned_collector.refresh_from_db()
+                services.check_bonus_cycle(instance.assigned_collector)
+
+                Notification.objects.create(
+                    user=instance.citizen,
+                    title='Compound Cleanup Completed ✅',
+                    message=f'The compound cleanup for your premises has been marked as completed by {instance.assigned_collector.user.full_name}.'
+                )
 
 
+# ── Rule 2: Street Cleanup ViewSet ──
+class StreetCleanupViewSet(viewsets.ModelViewSet):
+    """
+    Admin manages street cleanups. Citizens cannot access this.
+    """
+    serializer_class = StreetCleanupSerializer
+    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
 
+    def get_queryset(self):
+        return StreetCleanup.objects.all().order_by('-triggered_at')
 
+    def perform_update(self, serializer):
+        old_status = self.get_object().status
+        instance = serializer.save()
 
+        # ── Rule 3: When admin completes a street cleanup, credit the assigned collector ──
+        if old_status != 'completed' and instance.status == 'completed':
+            from django.utils import timezone
+            from django.db.models import F
+            instance.completed_at = timezone.now()
+            instance.save(update_fields=['completed_at'])
 
+            if instance.assigned_collector:
+                Collector.objects.filter(pk=instance.assigned_collector.pk).update(
+                    street_cleanups_this_cycle=F('street_cleanups_this_cycle') + 1
+                )
+                instance.assigned_collector.refresh_from_db()
+                services.check_bonus_cycle(instance.assigned_collector)

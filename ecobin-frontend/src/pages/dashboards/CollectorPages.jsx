@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authFetch } from '../../api/auth';
 import { getAssignedPickups, uploadCompletionProof } from '../../api/Collector';
 import { getNotifications } from '../../api/notifications';
 import { getMyProfile } from '../../api/Users';
 import { ImageGallery } from '../../components/ImageGallery';
-import { MapPin, Trash2, TrendingUp, Award, Box, Bell, User, Phone, RefreshCw } from 'lucide-react';
+import { MapPin, Trash2, TrendingUp, Award, Box, Bell, User, Phone, RefreshCw, Star, Trophy, Zap, Home, CheckCircle2, Loader2 } from 'lucide-react';
 
 const STATUS_STYLES = {
   pending:   'bg-yellow-100 text-yellow-800',
@@ -25,6 +26,8 @@ export const CollectorRequests = () => {
   const [proofData, setProofData] = useState({ notes: '', weight: '', images: [] });
   const [submittingProof, setSubmittingProof] = useState(false);
 
+  const navigate = useNavigate();
+
   const loadPickups = async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -32,6 +35,10 @@ export const CollectorRequests = () => {
       const data = await getAssignedPickups();
       setPickups(Array.isArray(data) ? data : data.results || []);
     } catch (err) {
+      if (err.message?.toLowerCase().includes('session expired') || err.message?.toLowerCase().includes('log in')) {
+        navigate('/login');
+        return;
+      }
       setError(err.message);
     } finally {
       setLoading(false);
@@ -340,35 +347,127 @@ export const CollectorBins = () => {
  );
 };
 
-export const CollectorRecycling = () => {
- const mockStats = [
- { label: "Total Recycled", value: "2,450 kg", icon: <Box size={20} /> },
- { label: "Efficiency Rating", value: "94%", icon: <TrendingUp size={20} /> },
- { label: "Collector Rank", value: "#3", icon: <Award size={20} /> },
- ];
+// ── Rules 3, 4, 5: Collector Performance & Bonus Panel ──
+const CycleProgressBar = ({ label, value, max, color = 'bg-[#387478]' }) => {
+  const pct = Math.min(100, Math.round((value / max) * 100));
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="font-medium text-secondary">{label}</span>
+        <span className="font-bold text-primary">{value} / {max}</span>
+      </div>
+      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
+        <div
+          className={`h-2.5 rounded-full transition-all duration-500 ${pct >= 100 ? 'bg-green-500' : color}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+};
 
- return (
- <div className="space-y-6">
- <div className="p-8 card-modern">
- <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-2">Recycling Performance</h2>
- <p className="text-sm text-secondary mb-6">Your impact at a glance for this month.</p>
- 
- <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
- {mockStats.map((stat, idx) => (
- <div key={idx} className="p-6 card-modern shadow-inner border-eco-sage/10 flex items-center space-x-4">
- <div className="p-3 bg-white dark:bg-eco-charcoal text-primary rounded-full shadow-sm hover:scale-110 transition-transform duration-300">
- {stat.icon}
- </div>
- <div>
- <p className="text-sm text-muted font-medium">{stat.label}</p>
- <p className="text-2xl font-bold text-[#0E1240] text-primary">{stat.value}</p>
- </div>
- </div>
- ))}
- </div>
- </div>
- </div>
- );
+export const CollectorRecycling = () => {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    // Fetch collector profile which includes bonus/points fields
+    authFetch('/collectors/')
+      .then(data => {
+        const list = Array.isArray(data) ? data : data.results || [];
+        // The current user's collector record
+        if (list.length > 0) setStats(list[0]);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div className="flex justify-center items-center h-48">
+      <Loader2 className="w-7 h-7 animate-spin text-[#387478]" />
+    </div>
+  );
+
+  if (error) return <p className="text-sm text-red-500 p-4">{error}</p>;
+
+  // Points gauge (0–5 scale)
+  const points = stats?.points ?? 0;
+  const pointsPct = Math.round((points / 5) * 100);
+  const bonusCycles = stats?.bonus_cycles_completed ?? 0;
+  const incrementQualified = stats?.increment_qualified ?? false;
+
+  return (
+    <div className="space-y-6">
+      {/* Increment badge */}
+      {incrementQualified && (
+        <div className="p-4 bg-gradient-to-r from-yellow-400 to-amber-500 rounded-2xl flex items-center gap-3 shadow-lg">
+          <Trophy className="w-8 h-8 text-white shrink-0" />
+          <div>
+            <p className="font-bold text-white text-lg">Increment Qualified! 🎉</p>
+            <p className="text-yellow-100 text-sm">You've completed 3 bonus cycles. Contact admin for your tier/salary upgrade.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Points & Bonus card */}
+      <div className="card-modern p-6">
+        <h2 className="text-2xl font-bold text-primary mb-1">Performance Overview</h2>
+        <p className="text-sm text-secondary mb-6">Live stats from your collections and ratings.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          <div className="p-5 bg-gradient-to-br from-[#387478]/10 to-[#243642]/5 rounded-xl border border-[#387478]/20">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted mb-1">Points Score</p>
+            <p className="text-3xl font-extrabold text-[#387478]">{points.toFixed(1)}<span className="text-base text-muted font-normal">/5.0</span></p>
+            <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5">
+              <div className="h-1.5 rounded-full bg-[#387478] transition-all duration-500" style={{ width: `${pointsPct}%` }} />
+            </div>
+            <p className="text-xs text-muted mt-1">{stats?.ratings_count ?? 0} ratings received</p>
+          </div>
+          <div className="p-5 bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-100">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted mb-1">Bonus Amount</p>
+            <p className="text-3xl font-extrabold text-green-600">₹{(stats?.bonus_amount ?? 0).toFixed(0)}</p>
+            <p className="text-xs text-muted mt-2">Scales with your rating score</p>
+          </div>
+          <div className="p-5 bg-gradient-to-br from-purple-50 to-violet-50 rounded-xl border border-purple-100">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted mb-1">Bonus Cycles</p>
+            <p className="text-3xl font-extrabold text-purple-600">{bonusCycles}<span className="text-base text-muted font-normal">/3</span></p>
+            <p className="text-xs text-muted mt-2">Completed cycles toward increment</p>
+          </div>
+        </div>
+
+        {/* Current cycle progress */}
+        <div className="border-t border-gray-100 pt-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-4 h-4 text-amber-500" />
+            <h3 className="font-bold text-sm text-primary uppercase tracking-wide">Current Bonus Cycle Progress</h3>
+          </div>
+          <div className="space-y-3">
+            <CycleProgressBar
+              label="Recyclable Collections"
+              value={stats?.total_recyclable_collections ?? 0}
+              max={10}
+              color="bg-green-500"
+            />
+            <CycleProgressBar
+              label="Compound Cleanups"
+              value={stats?.compound_cleanups_this_cycle ?? 0}
+              max={2}
+              color="bg-blue-500"
+            />
+            <CycleProgressBar
+              label="Street Cleanups"
+              value={stats?.street_cleanups_this_cycle ?? 0}
+              max={1}
+              color="bg-purple-500"
+            />
+          </div>
+          <p className="text-xs text-muted mt-3">
+            Complete all 3 thresholds in one cycle to earn a bonus. After 3 cycles → salary increment.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export const CollectorNotifications = () => {
@@ -399,8 +498,9 @@ export const CollectorNotifications = () => {
  ) : (
  <ul className="w-full max-w-3xl space-y-3">
  {notifications.map((n) => (
- <li key={n.id} className="p-5 card-modern shadow-inner border-eco-sage/10">
- <p className="text-sm text-secondary dark:text-gray-200">{n.message || 'No message'}</p>
+ <li key={n.notification_id || n.id} className="p-5 card-modern shadow-inner border-eco-sage/10">
+ <p className="text-sm font-semibold text-primary">{n.title}</p>
+ <p className="text-sm text-secondary dark:text-gray-200 mt-0.5">{n.message || 'No message'}</p>
  <p className="text-xs text-muted mt-1">{new Date(n.created_at).toLocaleString()}</p>
  </li>
  ))}

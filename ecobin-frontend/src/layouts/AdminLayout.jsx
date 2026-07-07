@@ -1,8 +1,9 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
  LayoutDashboard, Users, Truck, Trash2, List, FileText,
- Recycle, MessageSquare, Bell, Shield, Settings, LogOut, Menu, X
+ Recycle, MessageSquare, Bell, Shield, Settings, LogOut, Menu, X, Sparkles
 } from "lucide-react";
+
 import { useState, useEffect } from "react";
 import { getMyProfile } from "../api/Users";
 import { getNotifications } from "../api/notifications";
@@ -16,6 +17,7 @@ const navItems = [
  { to: "/admin/categories", icon: List, label: "Waste Categories" },
  { to: "/admin/pickups", icon: FileText, label: "Pickup Requests" },
  { to: "/admin/collections", icon: Recycle, label: "Collections & Recycling" },
+ { to: "/admin/cleanups", icon: Sparkles, label: "Cleanups" },
  { to: "/admin/feedback", icon: MessageSquare, label: "Feedback" },
  { to: "/admin/notifications", icon: Bell, label: "Notifications", id: "notifications" },
  { to: "/admin/audit", icon: Shield, label: "Audit Log" },

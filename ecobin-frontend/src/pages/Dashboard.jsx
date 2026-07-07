@@ -1,6 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { GoogleMap, useJsApiLoader, Marker, Autocomplete } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker as LeafletMarker, useMapEvents } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+// Fix Leaflet's default icon issue
+import icon from 'leaflet/dist/images/marker-icon.png';
+import iconShadow from 'leaflet/dist/images/marker-shadow.png';
+let DefaultIcon = L.icon({
+    iconUrl: icon,
+    shadowUrl: iconShadow,
+    iconSize: [25, 41],
+    iconAnchor: [12, 41]
+});
+L.Marker.prototype.options.icon = DefaultIcon;
+
 import { getMyPickups, getCategories, createPickupRequest, uploadCitizenProof } from '../api/pickups';
 import { getMyProfile } from '../api/Users';
 import { UploadCloud, X } from 'lucide-react';
@@ -15,8 +29,6 @@ const STATUS_STYLES = {
  recycled: 'bg-green-100 text-green-800',
  cancelled: 'bg-red-100 text-red-800',
 };
-
-const libraries = ['places'];
 
 export function CitizenDashboard() {
  const [pickups, setPickups] = useState([]);
@@ -33,6 +45,7 @@ export function CitizenDashboard() {
     quantity: '',
     pickup_date: '',
     address: '',
+    street: '',
     landmark: '',
     description: '',
     images: [],
@@ -44,59 +57,46 @@ export function CitizenDashboard() {
   const [verifyImages, setVerifyImages] = useState([]);
   const [uploadingVerify, setUploadingVerify] = useState(false);
 
-  const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
-    libraries
-  });
+  // Helper component to handle map clicks
+  const MapEvents = ({ onClick }) => {
+    useMapEvents({
+      click(e) {
+        onClick(e);
+      }
+    });
+    return null;
+  };
 
-  const [autocomplete, setAutocomplete] = useState(null);
-  
-  const onMapClick = useCallback((e) => {
-    const lat = e.latLng.lat();
-    const lng = e.latLng.lng();
+  const onMapClick = useCallback(async (e) => {
+    const { lat, lng } = e.latlng;
     setNewRequest(prev => ({ ...prev, latitude: lat, longitude: lng }));
     
-    if (window.google) {
-      const geocoder = new window.google.maps.Geocoder();
-      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-        if (status === 'OK' && results[0]) {
-          setNewRequest(prev => ({ ...prev, address: results[0].formatted_address }));
-        }
-      });
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+      const data = await res.json();
+      if (data && data.display_name) {
+        setNewRequest(prev => ({ ...prev, address: data.display_name }));
+      }
+    } catch (err) {
+      console.error("Geocoding failed", err);
     }
   }, []);
 
-  const onPlaceChanged = () => {
-    if (autocomplete !== null) {
-      const place = autocomplete.getPlace();
-      if (place.geometry) {
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        setNewRequest(prev => ({
-          ...prev,
-          latitude: lat,
-          longitude: lng,
-          address: place.formatted_address || place.name || prev.address
-        }));
-      }
-    }
-  };
-
   useEffect(() => {
     if (showModal && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((position) => {
+      navigator.geolocation.getCurrentPosition(async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         setNewRequest(prev => ({ ...prev, latitude: lat, longitude: lng }));
         
-        if (window.google) {
-          const geocoder = new window.google.maps.Geocoder();
-          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-            if (status === 'OK' && results[0]) {
-              setNewRequest(prev => ({ ...prev, address: results[0].formatted_address }));
-            }
-          });
+        try {
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`);
+          const data = await res.json();
+          if (data && data.display_name) {
+            setNewRequest(prev => ({ ...prev, address: data.display_name }));
+          }
+        } catch (err) {
+           console.error("Geocoding failed", err);
         }
       }, () => {
         // user denied or error, keep default
@@ -104,30 +104,37 @@ export function CitizenDashboard() {
     }
   }, [showModal]);
 
- async function loadPickups() {
- try {
- const data = await getMyPickups();
- setPickups(Array.isArray(data) ? data : data.results || []);
- } catch (err) {
- setError(err.message);
- } finally {
- setLoading(false);
- }
- }
+  const navigate = useNavigate();
+
+  async function loadPickups() {
+    try {
+      const data = await getMyPickups();
+      setPickups(Array.isArray(data) ? data : data.results || []);
+    } catch (err) {
+      // If the session expired (authFetch called logoutUser), redirect to login
+      if (err.message?.toLowerCase().includes('session expired') || err.message?.toLowerCase().includes('log in')) {
+        navigate('/login');
+        return;
+      }
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-  async function fetchData() {
-  await loadPickups();
-       const cats = await getCategories();
-       const results = Array.isArray(cats) ? cats : (cats.results || []);
-       setCategories(results);
-  }
-  fetchData();
-  const interval = setInterval(() => { loadPickups(); }, 15000);
-  return () => clearInterval(interval);
+    async function fetchData() {
+      await loadPickups();
+      try {
+        const cats = await getCategories();
+        setCategories(Array.isArray(cats) ? cats : (cats.results || []));
+      } catch { /* categories are non-critical */ }
+    }
+    fetchData();
+    const interval = setInterval(() => { loadPickups(); }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  const navigate = useNavigate();
 
   const getDaysRemaining = (dateString) => {
     if (!dateString) return 0;
@@ -152,6 +159,7 @@ export function CitizenDashboard() {
     formData.append('quantity', newRequest.quantity);
     formData.append('pickup_date', newRequest.pickup_date);
     formData.append('address', newRequest.address);
+    formData.append('street', newRequest.street);
     formData.append('landmark', newRequest.landmark);
     formData.append('description', newRequest.description);
     formData.append('latitude', newRequest.latitude);
@@ -163,7 +171,7 @@ export function CitizenDashboard() {
 
     await createPickupRequest(formData);
     setShowModal(false);
-    setNewRequest({ category: '', quantity: '', pickup_date: '', address: '', landmark: '', description: '', images: [], latitude: 40.7128, longitude: -74.0060 });
+    setNewRequest({ category: '', quantity: '', pickup_date: '', address: '', street: '', landmark: '', description: '', images: [], latitude: 40.7128, longitude: -74.0060 });
  await loadPickups();
  // Show a success toast notification
  setSuccessMessage('Pickup request submitted successfully!');
@@ -394,25 +402,26 @@ export function CitizenDashboard() {
  </div>
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Address</label>
-            {isLoaded ? (
-              <Autocomplete onLoad={(autoC) => setAutocomplete(autoC)} onPlaceChanged={onPlaceChanged}>
-                <input 
-                  type="text" required
-                  value={newRequest.address}
-                  onChange={(e) => setNewRequest({...newRequest, address: e.target.value})}
-                  className="input-modern w-full"
-                  placeholder="Search for your address or enter manually..."
-                />
-              </Autocomplete>
-            ) : (
-              <input 
-                type="text" required
-                value={newRequest.address}
-                onChange={(e) => setNewRequest({...newRequest, address: e.target.value})}
-                className="input-modern"
-                placeholder="e.g. 123 Main St, Apt 4"
-              />
-            )}
+            <input 
+              type="text" required
+              value={newRequest.address}
+              onChange={(e) => setNewRequest({...newRequest, address: e.target.value})}
+              className="input-modern w-full"
+              placeholder="Search for your address or enter manually..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">
+              Street Name <span className="text-muted font-normal text-[10px] normal-case">(used to group street-level cleanups)</span>
+            </label>
+            <input 
+              type="text"
+              value={newRequest.street}
+              onChange={(e) => setNewRequest({...newRequest, street: e.target.value})}
+              className="input-modern"
+              placeholder="e.g. Oak Avenue, Main Street"
+            />
           </div>
 
           <div>
@@ -477,30 +486,20 @@ export function CitizenDashboard() {
 
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Pinpoint Location on Map</label>
-            {isLoaded ? (
-              <div className="h-64 rounded-xl overflow-hidden shadow-sm border border-gray-200 dark:border-gray-700">
-                <GoogleMap
-                  mapContainerStyle={{ width: '100%', height: '100%' }}
-                  center={{ lat: newRequest.latitude, lng: newRequest.longitude }}
-                  zoom={14}
-                  onClick={onMapClick}
-                  options={{
-                    disableDefaultUI: true,
-                    zoomControl: true,
-                  }}
-                >
-                  <Marker 
-                    draggable={true} 
-                    onDragEnd={onMapClick} 
-                    position={{ lat: newRequest.latitude, lng: newRequest.longitude }} 
-                  />
-                </GoogleMap>
-              </div>
-            ) : (
-              <div className="h-64 bg-gray-100 flex items-center justify-center rounded-xl text-sm text-secondary">
-                Loading Map...
-              </div>
-            )}
+            <div className="h-64 rounded-xl overflow-hidden shadow-sm border border-gray-200 dark:border-gray-700 relative z-0">
+              <MapContainer 
+                center={[newRequest.latitude, newRequest.longitude]} 
+                zoom={14} 
+                style={{ height: '100%', width: '100%', zIndex: 0 }}
+              >
+                <TileLayer
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                />
+                <LeafletMarker position={[newRequest.latitude, newRequest.longitude]} />
+                <MapEvents onClick={onMapClick} />
+              </MapContainer>
+            </div>
             <p className="text-xs text-muted mt-2">Click on the map to accurately place your pickup location pin.</p>
           </div>
 

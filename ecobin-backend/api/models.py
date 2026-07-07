@@ -96,6 +96,24 @@ class Collector(models.Model):
     assigned_area = models.CharField(max_length=255, blank=True, null=True)
     availability = models.CharField(max_length=20, choices=AVAILABILITY_CHOICES, default='available')
 
+    # --- Rule 3, 4, 5: Bonus & Points fields ---
+    # Points: running average of all citizen ratings (1–5 scale)
+    points = models.FloatField(default=0.0)
+    # Total number of ratings received (used to compute running average)
+    ratings_count = models.IntegerField(default=0)
+    # Bonus amount in currency units; scales with points
+    bonus_amount = models.FloatField(default=0.0)
+
+    # Per-cycle counters (reset after each completed bonus cycle)
+    total_recyclable_collections = models.IntegerField(default=0)
+    compound_cleanups_this_cycle = models.IntegerField(default=0)
+    street_cleanups_this_cycle = models.IntegerField(default=0)
+
+    # Lifetime counters
+    bonus_cycles_completed = models.IntegerField(default=0)
+    # Set True when 3 bonus cycles are completed → qualifies for increment
+    increment_qualified = models.BooleanField(default=False)
+
     def __str__(self):
         return f"Collector: {self.user.full_name} ({self.assigned_area or 'No Area'})"
 
@@ -124,6 +142,9 @@ class PickupRequest(models.Model):
     pickup_date = models.DateField()
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending_assignment')
     address = models.TextField(blank=True, null=True)
+    # --- Rule 2: Dedicated street field for street-level grouping ---
+    street = models.CharField(max_length=255, blank=True, null=True,
+                              help_text="Normalized street name used for street-cleanup grouping")
     landmark = models.TextField(blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     rejection_reason = models.TextField(blank=True, null=True)
@@ -134,8 +155,15 @@ class PickupRequest(models.Model):
     longitude = models.FloatField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # --- Rule 5: Mandatory rating gate ---
+    # Set True when pickup is completed; cleared when citizen submits feedback.
+    # Citizens cannot submit new requests while this is True.
+    pending_rating = models.BooleanField(default=False,
+                                          help_text="True when citizen must rate this collection before submitting new requests")
+
     def __str__(self):
         return f"Request {str(self.request_id)[:8]} - {self.status}"
+
 
 class PickupImage(models.Model):
     IMAGE_TYPE_CHOICES = [
@@ -180,14 +208,29 @@ class Recycling(models.Model):
         return f"Recycle Record {str(self.recycle_id)[:8]} at {self.recycling_center}"
 
 
-# --- 8. FEEDBACK MODEL ---
+# --- 8. FEEDBACK MODEL (linked to PickupRequest, not Collection) ---
 class Feedback(models.Model):
     feedback_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='feedbacks')
+    # Rule 5: Feedback is tied to the specific PickupRequest (one per completed pickup)
+    request = models.OneToOneField(
+        PickupRequest,
+        on_delete=models.CASCADE,
+        related_name='feedback',
+        null=True,
+        blank=True,
+        help_text="The completed pickup request being rated"
+    )
+    # Keep legacy collection FK as nullable for historical data compatibility
     collection = models.ForeignKey(Collection, on_delete=models.SET_NULL, null=True, blank=True, related_name='feedbacks')
     rating = models.IntegerField()
     comments = models.TextField()
     submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'request'], name='unique_feedback_per_request')
+        ]
 
     def __str__(self):
         return f"Feedback {str(self.feedback_id)[:8]} - Rating: {self.rating}"
@@ -231,3 +274,71 @@ class PasswordResetToken(models.Model):
 
     def __str__(self):
         return f"Reset Token for {self.user.email}"
+
+
+# --- 12. COMPOUND CLEANUP MODEL (Rule 1) ---
+class CompoundCleanup(models.Model):
+    """
+    Auto-created when a citizen submits 10+ pickup requests.
+    Represents a scheduled cleanup for that citizen's compound/premises.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+    ]
+
+    compound_cleanup_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    citizen = models.ForeignKey(User, on_delete=models.CASCADE, related_name='compound_cleanups')
+    assigned_collector = models.ForeignKey(
+        Collector, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_compound_cleanups'
+    )
+    triggered_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True, null=True)
+    # The request count that triggered this cleanup
+    trigger_request_count = models.IntegerField(default=10)
+
+    def __str__(self):
+        return f"Compound Cleanup for {self.citizen.full_name} [{self.status}]"
+
+
+# --- 13. STREET CLEANUP MODEL (Rule 2) ---
+class StreetCleanup(models.Model):
+    """
+    Auto-created when citizens sharing a street collectively submit 5+ pickup requests.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('in_progress', 'In Progress'),
+        ('completed', 'Completed'),
+    ]
+
+    street_cleanup_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # Normalized street name (the grouping key)
+    street = models.CharField(max_length=255)
+    assigned_collector = models.ForeignKey(
+        Collector, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_street_cleanups'
+    )
+    triggered_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    notes = models.TextField(blank=True, null=True)
+    # The collective request count that triggered this cleanup
+    trigger_request_count = models.IntegerField(default=5)
+
+    class Meta:
+        # Only one active (pending/in_progress) cleanup per street at a time
+        constraints = [
+            models.UniqueConstraint(
+                fields=['street'],
+                condition=models.Q(status__in=['pending', 'in_progress']),
+                name='unique_active_street_cleanup'
+            )
+        ]
+
+    def __str__(self):
+        return f"Street Cleanup: {self.street} [{self.status}]"

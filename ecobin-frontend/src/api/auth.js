@@ -45,45 +45,105 @@ export async function loginUser(email, password) {
   return data;
 }
 
-export function logoutUser() {
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('refresh_token');
-}
 
 export function getAccessToken() {
   return localStorage.getItem('access_token');
 }
 
+export function getRefreshToken() {
+  return localStorage.getItem('refresh_token');
+}
+
+export function logoutUser() {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  // Dispatch a storage event so other tabs / App.jsx can react
+  window.dispatchEvent(new Event('storage'));
+}
+
+// ── Silent token refresh ──
+// Returns the new access token on success, or null on failure.
+let _refreshPromise = null; // de-duplicate concurrent refresh attempts
+
+async function refreshAccessToken() {
+  // If a refresh is already in flight, wait for that one instead of making two
+  if (_refreshPromise) return _refreshPromise;
+
+  _refreshPromise = (async () => {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return null;
+
+    try {
+      const res = await fetch(`${API_BASE}/auth/token/refresh/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh: refreshToken }),
+      });
+
+      if (!res.ok) return null;
+
+      const data = await res.json();
+      if (data.access) {
+        localStorage.setItem('access_token', data.access);
+        // Some simplejwt configs also rotate the refresh token
+        if (data.refresh) {
+          localStorage.setItem('refresh_token', data.refresh);
+        }
+        return data.access;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+
+  return _refreshPromise;
+}
+
 // Wrapper around fetch that automatically attaches the JWT access token.
+// On a 401 (expired access token) it silently refreshes once and retries.
 // Use this for any request to a protected endpoint (e.g. /pickups/, /users/).
 export async function authFetch(path, options = {}) {
-  const token = getAccessToken();
+  const doRequest = async (token) => {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    };
 
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...options.headers,
+    if (options.body instanceof FormData) {
+      delete headers['Content-Type'];
+    }
+
+    return fetch(`${API_BASE}${path}`, { ...options, headers });
   };
 
-  if (options.body instanceof FormData) {
-    delete headers['Content-Type'];
-  }
+  let response = await doRequest(getAccessToken());
 
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
-
+  // ── Silent refresh on 401 ──
   if (response.status === 401) {
-    // Token missing/expired â€” log the user out and let the calling page redirect
-    logoutUser();
-    throw new Error('Session expired. Please log in again.');
+    const newToken = await refreshAccessToken();
+
+    if (newToken) {
+      // Retry the original request with the fresh token
+      response = await doRequest(newToken);
+    }
+
+    // If refresh also failed (or we still get 401), log out
+    if (response.status === 401) {
+      logoutUser();
+      throw new Error('Session expired. Please log in again.');
+    }
   }
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     const firstError = Object.values(data)[0];
-    const message = Array.isArray(firstError) ? firstError[0] : (data.detail || 'Request failed.');
+    const message = Array.isArray(firstError)
+      ? firstError[0]
+      : data.detail || data.error || 'Request failed.';
     throw new Error(message);
   }
 
@@ -92,8 +152,10 @@ export async function authFetch(path, options = {}) {
 }
 
 export function isLoggedIn() {
+  // Access token present is sufficient; authFetch will refresh it transparently
   return !!getAccessToken();
 }
+
 
 export async function requestPasswordReset(email) {
   const response = await fetch(`${API_BASE}/auth/password-reset/request/`, {

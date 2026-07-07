@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Truck, CheckCircle, Clock, MapPin, Mail, Phone, Loader2, UserCog, Activity, Box, Archive, Trash2, Edit } from 'lucide-react';
+import { Users, Truck, CheckCircle, Clock, MapPin, Mail, Phone, Loader2, UserCog, Activity, Box, Archive, Trash2, Edit, Star, Trophy, Zap, Home, Sparkles } from 'lucide-react';
 import RecyclableBadge from '../../components/RecyclableBadge';
 import { getAllUsers, deleteUser, getMyProfile, updateMyProfile } from '../../api/Users';
 import { getAllCollectors, deleteCollector } from '../../api/Collector';
-import { getSmartBins, getAllPickups, getAllCollections, getAllRecycling, getAuditLogs, getAllNotifications, assignCollector, approvePickup, rejectPickup, verifyCompletion, getAvailableCollectors, triggerAutoComplete } from '../../api/admin';
+import { getSmartBins, getAllPickups, getAllCollections, getAllRecycling, getAuditLogs, getAllNotifications, assignCollector, approvePickup, rejectPickup, verifyCompletion, getAvailableCollectors, triggerAutoComplete, getCompoundCleanups, getStreetCleanups, updateCompoundCleanup, updateStreetCleanup } from '../../api/admin';
 import { getCategories } from '../../api/pickups';
 import { ImageGallery } from '../../components/ImageGallery';
 
@@ -1056,8 +1056,8 @@ export const AdminCollections = () => {
             <tbody className="divide-y divide-gray-50">
               {collections.length === 0 ? (
                 <tr><td colSpan={4} className="p-6 text-center text-muted">No collections recorded yet.</td></tr>
-              ) : collections.map(c => (
-                <tr key={c.collection_id}>
+              ) : collections.map((c, idx) => (
+                <tr key={c.collection_id || c.id || idx}>
                   <td className="p-4 font-medium text-sm text-secondary">{c.collector}</td>
                   <td className="p-4 font-bold text-primary">{c.collected_weight} kg</td>
                   <td className="p-4 text-sm text-secondary">{c.collection_date}</td>
@@ -1078,8 +1078,8 @@ export const AdminCollections = () => {
             <tbody className="divide-y divide-gray-50">
               {recycling.length === 0 ? (
                 <tr><td colSpan={3} className="p-6 text-center text-muted">No recycling records yet.</td></tr>
-              ) : recycling.map(r => (
-                <tr key={r.recycle_id}>
+              ) : recycling.map((r, idx) => (
+                <tr key={r.recycle_id || r.id || idx}>
                   <td className="p-4 font-medium text-sm text-secondary">{r.recycling_center}</td>
                   <td className="p-4 font-bold text-primary">{r.recycled_weight} kg</td>
                   <td className="p-4 text-sm text-secondary">{r.recycled_date}</td>
@@ -1263,7 +1263,12 @@ export const AdminFeedback = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {feedback.map(f => (
           <div key={f.feedback_id} className="card-modern p-6">
-            <h3 className="font-bold text-lg mb-2">Rating: {f.rating}/5</h3>
+            <div className="flex items-center gap-1 mb-2">
+              {[1,2,3,4,5].map(s => (
+                <Star key={s} className={`w-4 h-4 ${s <= f.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />
+              ))}
+              <span className="text-xs text-muted ml-1">{f.rating}/5</span>
+            </div>
             <p className="text-secondary text-sm italic">"{f.comments}"</p>
             <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between">
               <span className="text-xs text-muted">{new Date(f.submitted_at).toLocaleDateString()}</span>
@@ -1271,6 +1276,231 @@ export const AdminFeedback = () => {
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+
+// ── Rule 1 & 2: Admin Cleanups Management ──
+const CLEANUP_STATUS_STYLES = {
+  pending:     'bg-yellow-100 text-yellow-800 border-yellow-200',
+  in_progress: 'bg-blue-100 text-blue-800 border-blue-200',
+  completed:   'bg-green-100 text-green-800 border-green-200',
+};
+
+const STATUS_OPTIONS = ['pending', 'in_progress', 'completed'];
+
+export const AdminCleanups = () => {
+  const [tab, setTab] = useState('compound'); // 'compound' | 'street'
+  const [compoundCleanups, setCompoundCleanups] = useState([]);
+  const [streetCleanups, setStreetCleanups] = useState([]);
+  const [collectors, setCollectors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [updating, setUpdating] = useState(null); // cleanup ID being updated
+
+  const showToast = (type, message) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  useEffect(() => {
+    Promise.all([
+      getCompoundCleanups(),
+      getStreetCleanups(),
+      getAvailableCollectors(),
+    ])
+      .then(([cc, sc, col]) => {
+        setCompoundCleanups(Array.isArray(cc) ? cc : cc.results || []);
+        setStreetCleanups(Array.isArray(sc) ? sc : sc.results || []);
+        setCollectors(Array.isArray(col) ? col : col.results || []);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleUpdate = async (type, id, data) => {
+    setUpdating(id);
+    try {
+      const updated = type === 'compound'
+        ? await updateCompoundCleanup(id, data)
+        : await updateStreetCleanup(id, data);
+
+      if (type === 'compound') {
+        setCompoundCleanups(prev => prev.map(c => c.compound_cleanup_id === id ? { ...c, ...updated } : c));
+      } else {
+        setStreetCleanups(prev => prev.map(c => c.street_cleanup_id === id ? { ...c, ...updated } : c));
+      }
+      showToast('success', 'Cleanup updated successfully.');
+    } catch (err) {
+      showToast('error', err.message || 'Update failed.');
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  if (loading) return (
+    <div className="flex justify-center items-center h-64">
+      <Loader2 className="w-8 h-8 text-[#387478] animate-spin" />
+    </div>
+  );
+
+  if (error) return (
+    <div className="bg-red-50 text-red-500 p-4 rounded-xl border border-red-100">
+      <span className="font-semibold">Error:</span>&nbsp;{error}
+    </div>
+  );
+
+  const currentList = tab === 'compound' ? compoundCleanups : streetCleanups;
+
+  return (
+    <div className="space-y-6">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-lg font-semibold text-sm flex items-center gap-2 ${
+          toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <span>⚠</span>}
+          {toast.message}
+        </div>
+      )}
+
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h2 className="text-3xl font-extrabold text-primary tracking-tight">Cleanup Management</h2>
+          <p className="text-secondary mt-1">Manage compound and street cleanups triggered by citizen requests.</p>
+        </div>
+        <div className="flex gap-2">
+          <span className="px-3 py-1.5 bg-yellow-100 text-yellow-800 rounded-lg text-xs font-bold">
+            {compoundCleanups.filter(c => c.status === 'pending').length} Compound Pending
+          </span>
+          <span className="px-3 py-1.5 bg-blue-100 text-blue-800 rounded-lg text-xs font-bold">
+            {streetCleanups.filter(c => c.status === 'pending').length} Street Pending
+          </span>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-gray-200 pb-0">
+        <button
+          onClick={() => setTab('compound')}
+          className={`px-5 py-2.5 text-sm font-bold rounded-t-lg border-b-2 transition-colors ${
+            tab === 'compound' ? 'border-[#387478] text-[#387478] bg-[#387478]/5' : 'border-transparent text-secondary hover:text-primary'
+          }`}
+        >
+          <Home className="w-4 h-4 inline mr-1.5" />
+          Compound Cleanups ({compoundCleanups.length})
+        </button>
+        <button
+          onClick={() => setTab('street')}
+          className={`px-5 py-2.5 text-sm font-bold rounded-t-lg border-b-2 transition-colors ${
+            tab === 'street' ? 'border-[#387478] text-[#387478] bg-[#387478]/5' : 'border-transparent text-secondary hover:text-primary'
+          }`}
+        >
+          <MapPin className="w-4 h-4 inline mr-1.5" />
+          Street Cleanups ({streetCleanups.length})
+        </button>
+      </div>
+
+      {/* Cleanup Cards */}
+      {currentList.length === 0 ? (
+        <div className="p-12 card-modern text-center">
+          <Sparkles className="w-12 h-12 mx-auto text-muted opacity-30 mb-3" />
+          <p className="text-secondary font-medium">No {tab} cleanups yet.</p>
+          <p className="text-xs text-muted mt-1">
+            {tab === 'compound'
+              ? 'Triggered when a citizen submits 10+ pickup requests.'
+              : 'Triggered when 5+ collective requests come from the same street.'}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {currentList.map(c => {
+            const id = tab === 'compound' ? c.compound_cleanup_id : c.street_cleanup_id;
+            const isUpdating = updating === id;
+            return (
+              <div key={id} className="card-modern p-6">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 bg-[#E2F1E7] rounded-lg shrink-0">
+                      {tab === 'compound' ? <Home className="w-5 h-5 text-[#387478]" /> : <MapPin className="w-5 h-5 text-[#387478]" />}
+                    </div>
+                    <div>
+                      <p className="font-bold text-primary">
+                        {tab === 'compound' ? `${c.citizen_name || 'Citizen'}'s Compound` : c.street}
+                      </p>
+                      {tab === 'compound' && (
+                        <p className="text-xs text-muted">{c.citizen_email}</p>
+                      )}
+                      <p className="text-xs text-muted mt-0.5">
+                        Triggered {new Date(c.triggered_at).toLocaleDateString()} · {c.trigger_request_count} requests
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border shrink-0 ${
+                    CLEANUP_STATUS_STYLES[c.status] || 'bg-gray-100 text-gray-700 border-gray-200'
+                  }`}>
+                    {c.status.replace('_', ' ')}
+                  </span>
+                </div>
+
+                {/* Assigned collector */}
+                {c.assigned_collector_name && (
+                  <p className="text-xs text-secondary mt-3">
+                    Assigned to: <span className="font-semibold">{c.assigned_collector_name}</span>
+                  </p>
+                )}
+                {c.completed_at && (
+                  <p className="text-xs text-green-600 mt-1">✅ Completed {new Date(c.completed_at).toLocaleDateString()}</p>
+                )}
+
+                {/* Admin actions */}
+                {c.status !== 'completed' && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-[180px]">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-muted mb-1">Assign Collector</label>
+                      <select
+                        className="input-modern text-sm py-2"
+                        value={c.assigned_collector || ''}
+                        onChange={e => handleUpdate(tab, id, { assigned_collector: e.target.value || null })}
+                        disabled={isUpdating}
+                      >
+                        <option value="">— Unassigned —</option>
+                        {collectors.map(col => (
+                          <option key={col.collector_id} value={col.collector_id}>
+                            {col.full_name} ({col.assigned_area})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex gap-2">
+                      {c.status === 'pending' && (
+                        <button
+                          onClick={() => handleUpdate(tab, id, { status: 'in_progress' })}
+                          disabled={isUpdating}
+                          className="px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                        >
+                          {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Mark In Progress'}
+                        </button>
+                      )}
+                      {c.status === 'in_progress' && (
+                        <button
+                          onClick={() => handleUpdate(tab, id, { status: 'completed' })}
+                          disabled={isUpdating}
+                          className="px-4 py-2 bg-green-600 text-white text-sm font-bold rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                        >
+                          {isUpdating ? <Loader2 className="w-4 h-4 animate-spin" /> : '✓ Mark Completed'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

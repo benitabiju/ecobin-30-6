@@ -2,8 +2,9 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import logo from '../assets/logo1.png';
 import {
  LayoutDashboard, FileText, Trash2, Star, MessageSquare,
- Bell, Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, Leaf
+ Bell, Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, Leaf, Sparkles
 } from "lucide-react";
+
 import { useState, useEffect } from "react";
 import { getMyProfile } from "../api/Users";
 import { getNotifications } from "../api/notifications";
@@ -31,6 +32,7 @@ export default function CitizenLayout({ handleLogout, theme, toggleTheme }) {
  const navItems = [
  { to: "/citizen/dashboard", icon: LayoutDashboard, label: "Dashboard" },
  { to: "/citizen/requests", icon: FileText, label: "My Requests", badge: 2 },
+ { to: "/citizen/cleanups", icon: Sparkles, label: "Compound Cleanups" },
  { to: "/citizen/bins", icon: Trash2, label: "Nearby Bins" },
  { to: "/citizen/recycling", icon: Star, label: "Recycling History" },
  { to: "/citizen/feedback", icon: MessageSquare, label: "Feedback" },
@@ -151,7 +153,8 @@ export default function CitizenLayout({ handleLogout, theme, toggleTheme }) {
  <div className="p-2 text-sm text-muted">No notifications</div>
  ) : (
  notifications.map((n) => (
- <div key={n.id} className="p-2 border-b border-gray-200 dark:border-slate-700">
+ <div key={n.notification_id || n.id} className="p-2 border-b border-gray-200 dark:border-slate-700">
+ <p className="text-xs font-semibold">{n.title}</p>
  <p className="text-sm">{n.message}</p>
  </div>
  ))

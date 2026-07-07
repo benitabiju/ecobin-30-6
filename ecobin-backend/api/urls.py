@@ -13,7 +13,9 @@ from .views import (
     SmartBinViewSet,
     UserProfileViewSet,
     NotificationViewSet,
-    WasteCategoryViewSet
+    WasteCategoryViewSet,
+    CompoundCleanupViewSet,
+    StreetCleanupViewSet,
 )
 
 # 1. Set up the router and register all resource viewsets
@@ -28,6 +30,9 @@ router.register(r'collections', views.CollectionViewSet, basename='collection')
 router.register(r'recycling', views.RecyclingViewSet, basename='recycling')
 router.register(r'feedback', views.FeedbackViewSet, basename='feedback')
 router.register(r'audit-logs', views.AuditLogViewSet, basename='audit-log')
+# Rule 1 & 2: Cleanup endpoints
+router.register(r'compound-cleanups', CompoundCleanupViewSet, basename='compound-cleanup')
+router.register(r'street-cleanups', StreetCleanupViewSet, basename='street-cleanup')
 
 # 2. Complete URL structure maps
 urlpatterns = [

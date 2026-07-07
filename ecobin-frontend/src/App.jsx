@@ -28,9 +28,9 @@ import NotFound from './pages/NotFound';
 import { useDarkMode } from './useDarkMode';
 
 // Placeholder Pages
-import { CitizenRequests, CitizenBins, CitizenRecycling, CitizenFeedback, CitizenNotifications, CitizenProfile } from './pages/dashboards/CitizenPages';
+import { CitizenRequests, CitizenBins, CitizenRecycling, CitizenFeedback, CitizenNotifications, CitizenProfile, CitizenCleanupStatus } from './pages/dashboards/CitizenPages';
 import { CollectorRequests, CollectorBins, CollectorRecycling, CollectorNotifications, CollectorProfile } from './pages/dashboards/CollectorPages';
-import { AdminUsers, AdminCollectors, AdminBins, AdminCategories, AdminPickups, AdminCollections, AdminFeedback, AdminNotifications, AdminAuditLog, AdminSettings } from './pages/dashboards/AdminPages';
+import { AdminUsers, AdminCollectors, AdminBins, AdminCategories, AdminPickups, AdminCollections, AdminFeedback, AdminNotifications, AdminAuditLog, AdminSettings, AdminCleanups } from './pages/dashboards/AdminPages';
 
 function App() {
  const [theme, toggleTheme] = useDarkMode();
@@ -83,6 +83,7 @@ function App() {
  <Route path="feedback" element={<CitizenFeedback />} />
  <Route path="notifications" element={<CitizenNotifications />} />
  <Route path="profile" element={<CitizenProfile />} />
+ <Route path="cleanups" element={<CitizenCleanupStatus />} />
  </Route>
 
  {/* Collector Dashboard (Private Layout) */}
@@ -104,6 +105,7 @@ function App() {
  <Route path="categories" element={<AdminCategories />} />
  <Route path="pickups" element={<AdminPickups />} />
  <Route path="collections" element={<AdminCollections />} />
+ <Route path="cleanups" element={<AdminCleanups />} />
  <Route path="feedback" element={<AdminFeedback />} />
  <Route path="notifications" element={<AdminNotifications />} />
  <Route path="audit" element={<AdminAuditLog />} />

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getAssignedPickups, updatePickupStatus, logCollection } from '../api/Collector';
 import RecyclableBadge from '../components/RecyclableBadge';
 import { MapPin, User, RefreshCw } from 'lucide-react';
@@ -72,6 +73,8 @@ export default function CollectorDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(new Date());
 
+  const navigate = useNavigate();
+
   const loadPickups = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -80,12 +83,16 @@ export default function CollectorDashboard() {
       setPickups(Array.isArray(data) ? data : data.results || []);
       setLastRefreshed(new Date());
     } catch (err) {
+      if (err.message?.toLowerCase().includes('session expired') || err.message?.toLowerCase().includes('log in')) {
+        navigate('/login');
+        return;
+      }
       setError(err.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     loadPickups();

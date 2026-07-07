@@ -1,8 +1,6 @@
 import { authFetch } from './auth';
 
 // Fetches the logged-in citizen's pickup requests.
-// Assumes PickupRequestViewSet's get_queryset() filters by request.user â€”
-// if it currently returns ALL requests instead, flag that to Claude to fix.
 export async function getMyPickups() {
   return authFetch('/pickups/');
 }
@@ -28,4 +26,19 @@ export async function uploadCitizenProof(pickupId, formData) {
     method: 'POST',
     body: formData,
   });
+}
+
+// Rule 5: Submit rating + feedback after a completed pickup
+export async function submitPickupFeedback(pickupId, { rating, comments }) {
+  return authFetch(`/pickups/${pickupId}/submit_feedback/`, {
+    method: 'POST',
+    body: JSON.stringify({ rating, comments }),
+  });
+}
+
+// Check if citizen has any pending ratings (blocks new requests)
+export async function getPendingRatingPickup() {
+  const pickups = await getMyPickups();
+  const all = Array.isArray(pickups) ? pickups : pickups.results || [];
+  return all.find(p => p.pending_rating === true) || null;
 }
