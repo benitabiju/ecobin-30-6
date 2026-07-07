@@ -5,8 +5,8 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getMyProfile } from "../api/Users";
+import { getNotifications } from "../api/notifications";
 import logo from '../assets/logo1.png';
-import { adminNotifications } from "../mockData";
 
 const navItems = [
  { to: "/admin/dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -17,7 +17,7 @@ const navItems = [
  { to: "/admin/pickups", icon: FileText, label: "Pickup Requests" },
  { to: "/admin/collections", icon: Recycle, label: "Collections & Recycling" },
  { to: "/admin/feedback", icon: MessageSquare, label: "Feedback" },
- { to: "/admin/notifications", icon: Bell, label: "Notifications", badge: adminNotifications.filter(n => !n.read).length },
+ { to: "/admin/notifications", icon: Bell, label: "Notifications", id: "notifications" },
  { to: "/admin/audit", icon: Shield, label: "Audit Log" },
  { to: "/admin/settings", icon: Settings, label: "Settings" },
 ];
@@ -26,10 +26,15 @@ export default function AdminLayout({ handleLogout, theme, toggleTheme }) {
  const [sidebarOpen, setSidebarOpen] = useState(false);
  const [isCollapsed, setIsCollapsed] = useState(false);
  const [profile, setProfile] = useState(null);
+ const [unreadCount, setUnreadCount] = useState(0);
  const isDark = theme === 'dark';
 
  useEffect(() => {
  getMyProfile().then(data => setProfile(data)).catch(err => console.error(err));
+ getNotifications().then(data => {
+   const results = Array.isArray(data) ? data : (data.results || []);
+   setUnreadCount(results.filter(n => !n.is_read).length);
+ }).catch(err => console.error(err));
  }, []);
 
  return (
@@ -73,7 +78,9 @@ export default function AdminLayout({ handleLogout, theme, toggleTheme }) {
 
  {/* Nav */}
  <nav className="flex-1 px-3 space-y-1 overflow-y-auto mt-2">
- {navItems.map(({ to, icon: Icon, label, badge }) => (
+ {navItems.map(({ to, icon: Icon, label, id }) => {
+   const badge = id === 'notifications' && unreadCount > 0 ? unreadCount : null;
+   return (
  <NavLink
  key={to}
  to={to}
@@ -97,7 +104,7 @@ export default function AdminLayout({ handleLogout, theme, toggleTheme }) {
  </span>
  ) : null}
  </NavLink>
- ))}
+ )})}
  </nav>
  </aside>
 

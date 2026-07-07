@@ -3,8 +3,9 @@ import { Users, Truck, CheckCircle, Clock, MapPin, Mail, Phone, Loader2, UserCog
 import RecyclableBadge from '../../components/RecyclableBadge';
 import { getAllUsers, deleteUser, getMyProfile, updateMyProfile } from '../../api/Users';
 import { getAllCollectors, deleteCollector } from '../../api/Collector';
-import { getSmartBins, getAllPickups, getAllCollections, getAllRecycling, getAuditLogs, getAllNotifications, assignCollector } from '../../api/admin';
+import { getSmartBins, getAllPickups, getAllCollections, getAllRecycling, getAuditLogs, getAllNotifications, assignCollector, approvePickup, rejectPickup, verifyCompletion, getAvailableCollectors, triggerAutoComplete } from '../../api/admin';
 import { getCategories } from '../../api/pickups';
+import { ImageGallery } from '../../components/ImageGallery';
 
 export const AdminUsers = () => {
   const [users, setUsers] = useState([]);
@@ -441,12 +442,18 @@ export const AdminPickups = () => {
   const [collectors, setCollectors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [filter, setFilter] = useState('active');
 
   // Assignment modal state
   const [assigningPickup, setAssigningPickup] = useState(null); // the pickup being assigned
   const [collectorSearch, setCollectorSearch] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success'|'error', message }
+  
+  // Review Modal state
+  const [reviewingPickup, setReviewingPickup] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [reviewing, setReviewing] = useState(false);
 
   const showToast = (type, message) => {
     setToast({ type, message });
@@ -457,7 +464,7 @@ export const AdminPickups = () => {
     try {
       const [pickupsData, collectorsData] = await Promise.all([
         getAllPickups(),
-        getAllCollectors(),
+        getAvailableCollectors(),
       ]);
       setPickups(Array.isArray(pickupsData) ? pickupsData : pickupsData.results || []);
       setCollectors(Array.isArray(collectorsData) ? collectorsData : collectorsData.results || []);
@@ -486,9 +493,66 @@ export const AdminPickups = () => {
     }
   };
 
+  const handleApprove = async () => {
+    if (!reviewingPickup) return;
+    setReviewing(true);
+    try {
+      await approvePickup(reviewingPickup.request_id);
+      showToast('success', 'Pickup request approved.');
+      setReviewingPickup(null);
+      await fetchData();
+    } catch (err) {
+      showToast('error', err.message || 'Failed to approve request.');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!reviewingPickup) return;
+    if (!rejectReason.trim()) {
+      showToast('error', 'Rejection reason is required.');
+      return;
+    }
+    setReviewing(true);
+    try {
+      await rejectPickup(reviewingPickup.request_id, rejectReason);
+      showToast('success', 'Pickup request rejected.');
+      setReviewingPickup(null);
+      setRejectReason('');
+      await fetchData();
+    } catch (err) {
+      showToast('error', err.message || 'Failed to reject request.');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  const handleVerify = async (actionType) => {
+    if (!reviewingPickup) return;
+    if (actionType === 'reject' && !rejectReason.trim()) {
+      showToast('error', 'Rejection reason is required.');
+      return;
+    }
+    setReviewing(true);
+    try {
+      await verifyCompletion(reviewingPickup.request_id, actionType, rejectReason);
+      showToast('success', actionType === 'approve' ? 'Collection verified.' : 'Collection proof rejected.');
+      setReviewingPickup(null);
+      setRejectReason('');
+      await fetchData();
+    } catch (err) {
+      showToast('error', err.message || 'Failed to verify completion.');
+    } finally {
+      setReviewing(false);
+    }
+  };
+
   const STATUS_COLORS = {
     pending:   'bg-yellow-100 text-yellow-800 border-yellow-200',
     assigned:  'bg-blue-100 text-blue-800 border-blue-200',
+    pending_verification: 'bg-orange-100 text-orange-800 border-orange-200',
+    completed: 'bg-green-100 text-green-800 border-green-200',
     collected: 'bg-purple-100 text-purple-800 border-purple-200',
     recycled:  'bg-green-100 text-green-800 border-green-200',
     cancelled: 'bg-red-100 text-red-800 border-red-200',
@@ -515,11 +579,43 @@ export const AdminPickups = () => {
       p => p.assigned_collector === collectorId && ['pending', 'assigned'].includes(p.status)
     ).length;
 
+  const [triggering, setTriggering] = useState(false);
+
+  const handleTriggerAutoComplete = async () => {
+    try {
+      setTriggering(true);
+      await triggerAutoComplete();
+      setToast({ message: 'Auto-completion triggered successfully!', type: 'success' });
+      await fetchData();
+    } catch (err) {
+      setToast({ message: `Error: ${err.message}`, type: 'error' });
+    } finally {
+      setTriggering(false);
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const getDaysRemaining = (dateString) => {
+    if (!dateString) return 0;
+    const completedAt = new Date(dateString);
+    const deadline = new Date(completedAt.getTime() + 72 * 60 * 60 * 1000);
+    const now = new Date();
+    const diff = deadline - now;
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  };
+
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" /></div>;
   if (error) return <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100">{error}</div>;
 
-  const pendingCount  = pickups.filter(p => p.status === 'pending').length;
+  const pendingCount  = pickups.filter(p => p.status === 'pending_review' || p.status === 'pending_assignment').length;
   const assignedCount = pickups.filter(p => p.status === 'assigned').length;
+
+  const filteredPickups = pickups.filter(p => {
+    if (filter === 'active') {
+      return ['pending_assignment', 'submitted', 'pending_review', 'assigned', 'in_progress', 'pending_verification'].includes(p.status);
+    }
+    return ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status);
+  });
 
   return (
     <div className="space-y-6">
@@ -540,6 +636,13 @@ export const AdminPickups = () => {
           <p className="text-secondary mt-1">Manage and assign all citizen pickup requests.</p>
         </div>
         <div className="flex gap-3">
+          <button 
+            onClick={handleTriggerAutoComplete}
+            disabled={triggering}
+            className="bg-orange-100 hover:bg-orange-200 text-orange-800 px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm transition-colors disabled:opacity-50"
+          >
+            {triggering ? 'Triggering...' : 'Trigger Auto-Complete'}
+          </button>
           <div className="bg-yellow-100 text-yellow-800 px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm">
             <Clock className="w-4 h-4" /> {pendingCount} Pending
           </div>
@@ -547,6 +650,21 @@ export const AdminPickups = () => {
             <CheckCircle className="w-4 h-4" /> {assignedCount} Assigned
           </div>
         </div>
+      </div>
+      
+      <div className="flex space-x-2">
+        <button 
+          onClick={() => setFilter('active')}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'active' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+        >
+          Active ({pickups.filter(p => ['submitted', 'pending_review', 'assigned', 'pending_verification'].includes(p.status)).length})
+        </button>
+        <button 
+          onClick={() => setFilter('completed')}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'completed' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+        >
+          Completed ({pickups.filter(p => ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status)).length})
+        </button>
       </div>
 
       {/* Table */}
@@ -565,13 +683,13 @@ export const AdminPickups = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {pickups.length === 0 ? (
+              {filteredPickups.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-10 text-center text-muted text-sm">
-                    No pickup requests found.
+                    No pickup requests found in this view.
                   </td>
                 </tr>
-              ) : pickups.map(p => (
+              ) : filteredPickups.map(p => (
                 <tr key={p.request_id} className="hover:bg-gray-50/60 transition-colors">
                   <td className="p-4">
                     <div className="flex items-center gap-2.5">
@@ -608,10 +726,15 @@ export const AdminPickups = () => {
                     )}
                   </td>
                   <td className="p-4">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_COLORS[p.status] || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
-                      {p.status}
-                    </span>
-                  </td>
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap ${STATUS_COLORS[p.status] || 'bg-gray-100 text-gray-800 border-gray-200'}`}>
+                        {p.status.replace(/_/g, ' ')}
+                      </span>
+                      {p.status === 'pending_verification' && (
+                        <div className="mt-2 text-xs font-semibold text-orange-600">
+                          ⏳ {getDaysRemaining(p.collector_completed_at)} days left
+                        </div>
+                      )}
+                    </td>
                   <td className="p-4">
                     {p.assigned_collector_detail ? (
                       <div>
@@ -625,18 +748,32 @@ export const AdminPickups = () => {
                       <span className="text-xs text-muted italic">Unassigned</span>
                     )}
                   </td>
-                  <td className="p-4 text-right">
-                    <button
-                      onClick={() => { setAssigningPickup(p); setCollectorSearch(''); }}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                        p.assigned_collector_detail
-                          ? 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200'
-                          : 'bg-[#387478] text-white hover:bg-[#2d5f62] shadow-sm'
-                      }`}
-                    >
-                      <UserCog className="w-3.5 h-3.5" />
-                      {p.assigned_collector_detail ? 'Reassign' : 'Assign'}
-                    </button>
+                  <td className="p-4">
+                    <div className="flex flex-col gap-2 items-end">
+                      {['pending_review', 'pending_verification'].includes(p.status) && (
+                        <button
+                          onClick={() => { setReviewingPickup(p); setRejectReason(''); }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200"
+                        >
+                          <Activity className="w-3.5 h-3.5" />
+                          Review
+                        </button>
+                      )}
+                      
+                      {['pending_assignment', 'approved', 'assigned', 'in_progress', 'collected'].includes(p.status) && (
+                        <button
+                          onClick={() => { setAssigningPickup(p); setCollectorSearch(''); }}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                            p.assigned_collector_detail
+                              ? 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200'
+                              : 'bg-[#387478] text-white hover:bg-[#2d5f62] shadow-sm'
+                          }`}
+                        >
+                          <UserCog className="w-3.5 h-3.5" />
+                          {p.assigned_collector_detail ? 'Reassign' : 'Assign'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -697,7 +834,7 @@ export const AdminPickups = () => {
                 <p className="text-center text-sm text-muted py-8">No collectors found.</p>
               ) : filteredCollectors.map(c => {
                 const isCurrentlyAssigned = assigningPickup.assigned_collector === c.collector_id;
-                const activeCount = activeAssignmentsCount(c.collector_id);
+                const activeCount = c.active_assignment_count || 0;
                 return (
                   <div
                     key={c.collector_id}
@@ -764,6 +901,105 @@ export const AdminPickups = () => {
           </div>
         </div>
       )}
+
+      {/* Review Modal */}
+      {reviewingPickup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-start">
+              <div>
+                <h3 className="text-2xl font-extrabold text-primary">
+                  Review Pickup Request
+                </h3>
+                <span className={`inline-block mt-2 px-2.5 py-1 rounded-full text-xs font-semibold border ${STATUS_COLORS[reviewingPickup.status] || 'bg-gray-100 text-gray-700'}`}>
+                  {reviewingPickup.status}
+                </span>
+              </div>
+              <button onClick={() => setReviewingPickup(null)} className="text-muted hover:text-primary text-xl leading-none p-1">✕</button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <div className="text-xs font-bold uppercase text-muted tracking-wider">Citizen</div>
+                  <div className="font-semibold text-primary">{reviewingPickup.user_detail?.full_name}</div>
+                  <div className="text-sm text-secondary">{reviewingPickup.user_detail?.email}</div>
+                  <div className="text-sm text-secondary">{reviewingPickup.user_detail?.phone}</div>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-xs font-bold uppercase text-muted tracking-wider">Category</div>
+                  <div className="font-semibold text-primary">{reviewingPickup.category_detail?.category_name}</div>
+                  <div className="text-sm text-secondary">{reviewingPickup.quantity} kg</div>
+                </div>
+              </div>
+              
+              <div className="space-y-1">
+                <div className="text-xs font-bold uppercase text-muted tracking-wider">Location Info</div>
+                <div className="text-sm text-primary font-medium">{reviewingPickup.address}</div>
+                {reviewingPickup.landmark && <div className="text-sm text-secondary italic">Landmark: {reviewingPickup.landmark}</div>}
+                {reviewingPickup.latitude && (
+                  <a href={`https://www.google.com/maps?q=${reviewingPickup.latitude},${reviewingPickup.longitude}`} target="_blank" rel="noreferrer" className="text-sm text-[#387478] hover:underline flex items-center gap-1 mt-1">
+                    <MapPin className="w-4 h-4"/> Open in Google Maps
+                  </a>
+                )}
+              </div>
+              
+              {reviewingPickup.description && (
+                <div className="space-y-1">
+                  <div className="text-xs font-bold uppercase text-muted tracking-wider">Description / Notes</div>
+                  <div className="text-sm text-secondary bg-gray-50 p-3 rounded-lg border border-gray-100">{reviewingPickup.description}</div>
+                </div>
+              )}
+              
+              {reviewingPickup.images?.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-xs font-bold uppercase text-muted tracking-wider">Uploaded Images</div>
+                  <ImageGallery images={reviewingPickup.images} />
+                </div>
+              )}
+
+              {/* Action Area */}
+              <div className="pt-6 border-t border-gray-100">
+                {['submitted', 'pending_review'].includes(reviewingPickup.status) ? (
+                  <div className="space-y-4">
+                    <textarea 
+                      placeholder="Rejection reason (required if rejecting)..."
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      className="input-modern w-full"
+                    />
+                    <div className="flex gap-3">
+                      <button onClick={handleReject} disabled={reviewing || !rejectReason.trim()} className="flex-1 py-2 bg-red-100 text-red-700 hover:bg-red-200 font-bold rounded-xl transition-colors disabled:opacity-50">
+                        {reviewing ? <Loader2 className="w-4 h-4 mx-auto animate-spin"/> : 'Reject Request'}
+                      </button>
+                      <button onClick={handleApprove} disabled={reviewing} className="flex-1 py-2 bg-[#387478] text-white hover:bg-[#2d5f62] font-bold rounded-xl shadow-md transition-colors disabled:opacity-50">
+                        {reviewing ? <Loader2 className="w-4 h-4 mx-auto animate-spin"/> : 'Approve Request'}
+                      </button>
+                    </div>
+                  </div>
+                ) : reviewingPickup.status === 'pending_verification' ? (
+                  <div className="space-y-4">
+                    <textarea 
+                      placeholder="Rejection reason (required if rejecting proof)..."
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      className="input-modern w-full"
+                    />
+                    <div className="flex gap-3">
+                      <button onClick={() => handleVerify('reject')} disabled={reviewing || !rejectReason.trim()} className="flex-1 py-2 bg-red-100 text-red-700 hover:bg-red-200 font-bold rounded-xl transition-colors disabled:opacity-50">
+                        {reviewing ? <Loader2 className="w-4 h-4 mx-auto animate-spin"/> : 'Reject Proof'}
+                      </button>
+                      <button onClick={() => handleVerify('approve')} disabled={reviewing || (!reviewingPickup.images?.some(img => img.image_type === 'citizen_verification') && getDaysRemaining(reviewingPickup.collector_completed_at) > 0)} className="flex-1 py-2 bg-green-600 text-white hover:bg-green-700 font-bold rounded-xl shadow-md transition-colors disabled:opacity-50">
+                        {reviewing ? <Loader2 className="w-4 h-4 mx-auto animate-spin"/> : 'Verify Completion'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -771,36 +1007,87 @@ export const AdminPickups = () => {
 
 export const AdminCollections = () => {
   const [collections, setCollections] = useState([]);
+  const [recycling, setRecycling] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('collections'); // 'collections' | 'recycling'
 
   useEffect(() => {
-    getAllCollections().then(data => setCollections(Array.isArray(data) ? data : data.results || [])).finally(() => setLoading(false));
+    Promise.all([getAllCollections(), getAllRecycling()])
+      .then(([collectionsData, recyclingData]) => {
+        setCollections(Array.isArray(collectionsData) ? collectionsData : collectionsData.results || []);
+        setRecycling(Array.isArray(recyclingData) ? recyclingData : recyclingData.results || []);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="w-8 h-8 animate-spin mx-auto text-primary" /></div>;
 
   return (
     <div className="space-y-6">
-      <h2 className="text-3xl font-extrabold text-primary">Collections & Recycling</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-3xl font-extrabold text-primary">Collections & Recycling</h2>
+        <div className="flex space-x-2">
+          <button 
+            onClick={() => setActiveTab('collections')}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'collections' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+          >
+            Collections ({collections.length})
+          </button>
+          <button 
+            onClick={() => setActiveTab('recycling')}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${activeTab === 'recycling' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+          >
+            Recycling ({recycling.length})
+          </button>
+        </div>
+      </div>
+      
       <div className="card-modern overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr>
-              <th className="p-4 text-muted font-semibold text-sm">Collector ID</th>
-              <th className="p-4 text-muted font-semibold text-sm">Collected Weight</th>
-              <th className="p-4 text-muted font-semibold text-sm">Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {collections.map(c => (
-              <tr key={c.collection_id}>
-                <td className="p-4 font-medium text-sm text-secondary">{c.collector}</td>
-                <td className="p-4 font-bold text-primary">{c.collected_weight} kg</td>
-                <td className="p-4 text-sm text-secondary">{c.collection_date}</td>
+        {activeTab === 'collections' ? (
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="p-4 text-muted font-semibold text-sm">Collector ID</th>
+                <th className="p-4 text-muted font-semibold text-sm">Collected Weight</th>
+                <th className="p-4 text-muted font-semibold text-sm">Date</th>
+                <th className="p-4 text-muted font-semibold text-sm">Remarks</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {collections.length === 0 ? (
+                <tr><td colSpan={4} className="p-6 text-center text-muted">No collections recorded yet.</td></tr>
+              ) : collections.map(c => (
+                <tr key={c.collection_id}>
+                  <td className="p-4 font-medium text-sm text-secondary">{c.collector}</td>
+                  <td className="p-4 font-bold text-primary">{c.collected_weight} kg</td>
+                  <td className="p-4 text-sm text-secondary">{c.collection_date}</td>
+                  <td className="p-4 text-sm text-secondary">{c.remarks || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="p-4 text-muted font-semibold text-sm">Center</th>
+                <th className="p-4 text-muted font-semibold text-sm">Recycled Weight</th>
+                <th className="p-4 text-muted font-semibold text-sm">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {recycling.length === 0 ? (
+                <tr><td colSpan={3} className="p-6 text-center text-muted">No recycling records yet.</td></tr>
+              ) : recycling.map(r => (
+                <tr key={r.recycle_id}>
+                  <td className="p-4 font-medium text-sm text-secondary">{r.recycling_center}</td>
+                  <td className="p-4 font-bold text-primary">{r.recycled_weight} kg</td>
+                  <td className="p-4 text-sm text-secondary">{r.recycled_date}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

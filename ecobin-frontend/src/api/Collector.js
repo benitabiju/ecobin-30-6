@@ -45,3 +45,10 @@ export async function logCollection(requestId, weightKg, notes) {
   });
 }
 
+export async function uploadCompletionProof(requestId, formData) {
+  return authFetch(`/pickups/${requestId}/upload_proof/`, {
+    method: 'POST',
+    body: formData, // FormData will be detected by authFetch and Content-Type will be removed
+  });
+}
+

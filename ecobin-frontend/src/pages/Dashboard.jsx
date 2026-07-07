@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
-import { getMyPickups, getCategories, createPickupRequest } from '../api/pickups';
+import { GoogleMap, useJsApiLoader, Marker, Autocomplete } from '@react-google-maps/api';
+import { getMyPickups, getCategories, createPickupRequest, uploadCitizenProof } from '../api/pickups';
 import { getMyProfile } from '../api/Users';
+import { UploadCloud, X } from 'lucide-react';
 import CollectorDashboard from './CollectorDashboard';
 import RecyclableBadge from '../components/RecyclableBadge';
+import { ImageGallery } from '../components/ImageGallery';
 
 const STATUS_STYLES = {
  pending: 'bg-yellow-100 text-yellow-800',
@@ -14,12 +16,15 @@ const STATUS_STYLES = {
  cancelled: 'bg-red-100 text-red-800',
 };
 
+const libraries = ['places'];
+
 export function CitizenDashboard() {
  const [pickups, setPickups] = useState([]);
  const [categories, setCategories] = useState([]);
  const [loading, setLoading] = useState(true);
  const [error, setError] = useState('');
  const [successMessage, setSuccessMessage] = useState('');
+ const [filter, setFilter] = useState('active');
  
  const [showModal, setShowModal] = useState(false);
  const [submitting, setSubmitting] = useState(false);
@@ -28,23 +33,76 @@ export function CitizenDashboard() {
     quantity: '',
     pickup_date: '',
     address: '',
+    landmark: '',
+    description: '',
+    images: [],
     latitude: 40.7128, // Default New York
     longitude: -74.0060
   });
 
+  const [verifyingPickup, setVerifyingPickup] = useState(null);
+  const [verifyImages, setVerifyImages] = useState([]);
+  const [uploadingVerify, setUploadingVerify] = useState(false);
+
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '' 
-    // Using env variable or empty string (which gives dev warning but works)
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    libraries
   });
 
+  const [autocomplete, setAutocomplete] = useState(null);
+  
   const onMapClick = useCallback((e) => {
-    setNewRequest(prev => ({
-      ...prev,
-      latitude: e.latLng.lat(),
-      longitude: e.latLng.lng()
-    }));
+    const lat = e.latLng.lat();
+    const lng = e.latLng.lng();
+    setNewRequest(prev => ({ ...prev, latitude: lat, longitude: lng }));
+    
+    if (window.google) {
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+        if (status === 'OK' && results[0]) {
+          setNewRequest(prev => ({ ...prev, address: results[0].formatted_address }));
+        }
+      });
+    }
   }, []);
+
+  const onPlaceChanged = () => {
+    if (autocomplete !== null) {
+      const place = autocomplete.getPlace();
+      if (place.geometry) {
+        const lat = place.geometry.location.lat();
+        const lng = place.geometry.location.lng();
+        setNewRequest(prev => ({
+          ...prev,
+          latitude: lat,
+          longitude: lng,
+          address: place.formatted_address || place.name || prev.address
+        }));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (showModal && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setNewRequest(prev => ({ ...prev, latitude: lat, longitude: lng }));
+        
+        if (window.google) {
+          const geocoder = new window.google.maps.Geocoder();
+          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+              setNewRequest(prev => ({ ...prev, address: results[0].formatted_address }));
+            }
+          });
+        }
+      }, () => {
+        // user denied or error, keep default
+      });
+    }
+  }, [showModal]);
 
  async function loadPickups() {
  try {
@@ -57,31 +115,55 @@ export function CitizenDashboard() {
  }
  }
 
- useEffect(() => {
- async function fetchData() {
- await loadPickups();
-      const cats = await getCategories();
-      const results = Array.isArray(cats) ? cats : (cats.results || []);
-      setCategories(results);
- }
- fetchData();
- }, []);
+  useEffect(() => {
+  async function fetchData() {
+  await loadPickups();
+       const cats = await getCategories();
+       const results = Array.isArray(cats) ? cats : (cats.results || []);
+       setCategories(results);
+  }
+  fetchData();
+  const interval = setInterval(() => { loadPickups(); }, 15000);
+  return () => clearInterval(interval);
+  }, []);
 
- const navigate = useNavigate();
+  const navigate = useNavigate();
 
- const handleRequestSubmit = async (e) => {
- e.preventDefault();
- setSubmitting(true);
- setError('');
- try {
- // Ensure quantity is sent as a number, not a string
- const payload = {
- ...newRequest,
- quantity: newRequest.quantity !== '' ? parseFloat(newRequest.quantity) : undefined,
- };
- await createPickupRequest(payload);
- setShowModal(false);
-      setNewRequest({ category: '', quantity: '', pickup_date: '', address: '', latitude: 40.7128, longitude: -74.0060 });
+  const getDaysRemaining = (dateString) => {
+    if (!dateString) return 0;
+    const completedAt = new Date(dateString);
+    const deadline = new Date(completedAt.getTime() + 72 * 60 * 60 * 1000);
+    const now = new Date();
+    const diff = deadline - now;
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  };
+
+  const handleRequestSubmit = async (e) => {
+  e.preventDefault();
+  if (!newRequest.images || newRequest.images.length === 0) {
+    setError('Please upload at least one image of the trash/site.');
+    return;
+  }
+  setSubmitting(true);
+  setError('');
+  try {
+    const formData = new FormData();
+    formData.append('category', newRequest.category);
+    formData.append('quantity', newRequest.quantity);
+    formData.append('pickup_date', newRequest.pickup_date);
+    formData.append('address', newRequest.address);
+    formData.append('landmark', newRequest.landmark);
+    formData.append('description', newRequest.description);
+    formData.append('latitude', newRequest.latitude);
+    formData.append('longitude', newRequest.longitude);
+    
+    newRequest.images.forEach((file) => {
+      formData.append('images', file);
+    });
+
+    await createPickupRequest(formData);
+    setShowModal(false);
+    setNewRequest({ category: '', quantity: '', pickup_date: '', address: '', landmark: '', description: '', images: [], latitude: 40.7128, longitude: -74.0060 });
  await loadPickups();
  // Show a success toast notification
  setSuccessMessage('Pickup request submitted successfully!');
@@ -94,6 +176,39 @@ export function CitizenDashboard() {
  setSubmitting(false);
  }
  };
+
+  const handleVerifySubmit = async (e) => {
+    e.preventDefault();
+    if (verifyImages.length === 0) return setError("Please upload at least one image");
+    
+    setUploadingVerify(true);
+    setError('');
+    
+    try {
+      const formData = new FormData();
+      verifyImages.forEach(file => {
+        formData.append('images', file);
+      });
+      
+      await uploadCitizenProof(verifyingPickup.request_id, formData);
+      await loadPickups();
+      setSuccessMessage('Verification submitted successfully!');
+      setTimeout(() => setSuccessMessage(''), 3000);
+      setVerifyingPickup(null);
+      setVerifyImages([]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploadingVerify(false);
+    }
+  };
+
+  const filteredPickups = pickups.filter(p => {
+    if (filter === 'active') {
+      return ['pending_assignment', 'submitted', 'pending_review', 'assigned', 'in_progress', 'pending_verification'].includes(p.status);
+    }
+    return ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status);
+  });
 
  return (
  <main className="max-w-5xl mx-auto px-6 py-16">
@@ -144,17 +259,40 @@ export function CitizenDashboard() {
  </div>
  )}
 
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+      <div className="flex space-x-2">
+        <button 
+          onClick={() => setFilter('active')}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'active' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+        >
+          Active ({pickups.filter(p => ['pending_assignment', 'submitted', 'pending_review', 'assigned', 'in_progress', 'pending_verification'].includes(p.status)).length})
+        </button>
+        <button 
+          onClick={() => setFilter('history')}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'history' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+        >
+          History ({pickups.filter(p => ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status)).length})
+        </button>
+      </div>
+      <button
+        onClick={() => setShowModal(true)}
+        className="btn-primary py-2 px-5 text-sm"
+      >
+        + New Request
+      </button>
+    </div>
+
  {loading ? (
  <p className="text-sm text-muted">Loading your requests...</p>
- ) : pickups.length === 0 ? (
+ ) : filteredPickups.length === 0 ? (
  <div className="p-10 card-modern text-center">
  <p className="text-sm text-muted">
- You haven't made any pickup requests yet.
+ No pickup requests found in this view.
  </p>
  </div>
  ) : (
  <div className="flex flex-col gap-4">
- {pickups.map((pickup) => (
+ {filteredPickups.map((pickup) => (
  <div
  key={pickup.request_id}
  className="p-6 card-modern"
@@ -180,6 +318,21 @@ export function CitizenDashboard() {
  {pickup.status}
  </span>
  </div>
+ {pickup.status === 'pending_verification' && (
+    <div className="mt-3 pt-3 border-t border-gray-100">
+      <div className="mb-2 p-2 bg-orange-50 border border-orange-200 rounded-lg text-orange-800 text-xs font-semibold text-center">
+        ⏳ Auto-completes in {getDaysRemaining(pickup.collector_completed_at)} days if unverified
+      </div>
+      {!pickup.images?.some(img => img.image_type === 'citizen_verification') && (
+        <button
+          onClick={() => { setVerifyingPickup(pickup); setVerifyImages([]); }}
+          className="w-full py-2 bg-[#387478] text-white hover:bg-[#2d5f62] font-bold rounded-lg shadow-sm transition-colors text-sm"
+        >
+          Upload Verification Photo
+        </button>
+      )}
+    </div>
+  )}
  {pickup.assigned_collector_detail && (
  <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 text-xs text-muted">
  <span className="font-semibold text-secondary">Collector:</span>
@@ -189,6 +342,12 @@ export function CitizenDashboard() {
  )}
  </div>
  )}
+  {pickup.images?.length > 0 && (
+    <div className="mt-4 pt-4 border-t border-gray-100">
+      <div className="text-xs font-bold uppercase text-muted tracking-wider mb-2">Request Images</div>
+      <ImageGallery images={pickup.images} />
+    </div>
+  )}
  </div>
  ))}
  </div>
@@ -235,13 +394,85 @@ export function CitizenDashboard() {
  </div>
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Address</label>
+            {isLoaded ? (
+              <Autocomplete onLoad={(autoC) => setAutocomplete(autoC)} onPlaceChanged={onPlaceChanged}>
+                <input 
+                  type="text" required
+                  value={newRequest.address}
+                  onChange={(e) => setNewRequest({...newRequest, address: e.target.value})}
+                  className="input-modern w-full"
+                  placeholder="Search for your address or enter manually..."
+                />
+              </Autocomplete>
+            ) : (
+              <input 
+                type="text" required
+                value={newRequest.address}
+                onChange={(e) => setNewRequest({...newRequest, address: e.target.value})}
+                className="input-modern"
+                placeholder="e.g. 123 Main St, Apt 4"
+              />
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Landmark</label>
             <input 
-              type="text" required
-              value={newRequest.address}
-              onChange={(e) => setNewRequest({...newRequest, address: e.target.value})}
+              type="text" 
+              value={newRequest.landmark}
+              onChange={(e) => setNewRequest({...newRequest, landmark: e.target.value})}
               className="input-modern"
-              placeholder="e.g. 123 Main St, Apt 4"
+              placeholder="e.g. Near the big oak tree"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Description</label>
+            <textarea 
+              value={newRequest.description}
+              onChange={(e) => setNewRequest({...newRequest, description: e.target.value})}
+              className="input-modern min-h-[80px] py-3"
+              placeholder="Describe what needs to be picked up..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Upload Images</label>
+            <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl p-6 text-center hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+              <input 
+                type="file" 
+                multiple 
+                accept="image/*"
+                onChange={(e) => {
+                  const files = Array.from(e.target.files);
+                  setNewRequest(prev => ({ ...prev, images: [...prev.images, ...files] }));
+                }}
+                className="hidden" 
+                id="image-upload" 
+              />
+              <label htmlFor="image-upload" className="cursor-pointer flex flex-col items-center">
+                <UploadCloud className="w-8 h-8 text-secondary mb-2" />
+                <span className="text-sm font-medium text-primary">Click to upload or drag and drop</span>
+                <span className="text-xs text-muted mt-1">SVG, PNG, JPG or WEBP (max. 800x400px)</span>
+              </label>
+            </div>
+            
+            {newRequest.images.length > 0 && (
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {newRequest.images.map((file, idx) => (
+                  <div key={idx} className="relative group rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
+                    <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-20 object-cover" />
+                    <button 
+                      type="button"
+                      onClick={() => setNewRequest(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }))}
+                      className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
@@ -251,14 +482,18 @@ export function CitizenDashboard() {
                 <GoogleMap
                   mapContainerStyle={{ width: '100%', height: '100%' }}
                   center={{ lat: newRequest.latitude, lng: newRequest.longitude }}
-                  zoom={12}
+                  zoom={14}
                   onClick={onMapClick}
                   options={{
                     disableDefaultUI: true,
                     zoomControl: true,
                   }}
                 >
-                  <Marker position={{ lat: newRequest.latitude, lng: newRequest.longitude }} />
+                  <Marker 
+                    draggable={true} 
+                    onDragEnd={onMapClick} 
+                    position={{ lat: newRequest.latitude, lng: newRequest.longitude }} 
+                  />
                 </GoogleMap>
               </div>
             ) : (
@@ -281,8 +516,47 @@ export function CitizenDashboard() {
  </div>
  </div>
  )}
- </main>
- );
+
+      {/* Verification Modal */}
+      {verifyingPickup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-modern p-8 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold mb-2 text-primary font-display">Verify Pickup</h2>
+            <p className="text-sm text-secondary mb-6">The collector marked this pickup as complete. Please upload a photo of the cleared location to verify.</p>
+            <form onSubmit={handleVerifySubmit} className="flex flex-col gap-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Upload Verification Photo(s)</label>
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <UploadCloud className="w-8 h-8 text-muted mb-2" />
+                    <p className="text-sm text-secondary">Click to upload or drag & drop</p>
+                    <p className="text-xs text-muted mt-1">JPEG, PNG, WEBP</p>
+                  </div>
+                  <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setVerifyImages(Array.from(e.target.files))} />
+                </label>
+                {verifyImages.length > 0 && (
+                  <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+                    {verifyImages.map((file, i) => (
+                      <div key={i} className="relative w-16 h-16 shrink-0 group">
+                        <img src={URL.createObjectURL(file)} alt="Preview" className="w-full h-full object-cover rounded-lg border border-gray-200" />
+                        <button type="button" onClick={() => setVerifyImages(verifyImages.filter((_, idx) => idx !== i))} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setVerifyingPickup(null)} className="flex-1 py-2 text-secondary bg-gray-100 hover:bg-gray-200 font-bold rounded-xl transition-colors">Cancel</button>
+                <button type="submit" disabled={uploadingVerify || verifyImages.length === 0} className="flex-1 py-2 bg-[#C9742B] text-white hover:bg-[#b06323] font-bold rounded-xl shadow-md transition-colors disabled:opacity-50">
+                  {uploadingVerify ? 'Uploading...' : 'Verify Now'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+  </main>
+  );
 }
 
 export default function Dashboard() {

@@ -2,12 +2,18 @@ import React, { useEffect, useState } from 'react';
 import { getMyProfile } from '../../api/Users';
 import { Bell, MapPin, User, Truck } from 'lucide-react';
 import { getNotifications } from '../../api/notifications';
-import { getMyPickups } from '../../api/pickups';
+import { getMyPickups, uploadCitizenProof } from '../../api/pickups';
+import { UploadCloud, X } from 'lucide-react';
+import { ImageGallery } from '../../components/ImageGallery';
+import RecyclableBadge from '../../components/RecyclableBadge';
 
 const STATUS_STYLES = {
   pending:   { cls: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Pending Assignment' },
   assigned:  { cls: 'bg-blue-100 text-blue-800 border-blue-200',   label: 'Assigned' },
+  pending_citizen_verification: { cls: 'bg-orange-100 text-orange-800 border-orange-200', label: 'Pending Citizen Verify' },
+  pending_admin_verification: { cls: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Pending Admin Verify' },
   collected: { cls: 'bg-purple-100 text-purple-800 border-purple-200', label: 'Collected' },
+  completed: { cls: 'bg-green-100 text-green-800 border-green-200', label: 'Completed' },
   recycled:  { cls: 'bg-green-100 text-green-800 border-green-200', label: 'Recycled' },
   cancelled: { cls: 'bg-red-100 text-red-800 border-red-200',      label: 'Cancelled' },
 };
@@ -16,6 +22,12 @@ export const CitizenRequests = () => {
   const [pickups, setPickups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [filter, setFilter] = useState('active');
+
+  const [verifyingPickup, setVerifyingPickup] = useState(null);
+  const [verifyImages, setVerifyImages] = useState([]);
+  const [uploadingVerify, setUploadingVerify] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -31,29 +43,86 @@ export const CitizenRequests = () => {
     fetchData();
   }, []);
 
+  const loadPickups = async () => {
+    try {
+      const data = await getMyPickups();
+      setPickups(Array.isArray(data) ? data : data.results || []);
+    } catch (err) {}
+  };
+
+  const handleVerifySubmit = async (e) => {
+    e.preventDefault();
+    if (verifyImages.length === 0) return setError("Please upload at least one image");
+    
+    setUploadingVerify(true);
+    setError('');
+    
+    try {
+      const formData = new FormData();
+      verifyImages.forEach(file => {
+        formData.append('images', file);
+      });
+      
+      await uploadCitizenProof(verifyingPickup.request_id, formData);
+      await loadPickups();
+      setSuccessMessage('Verification submitted successfully!');
+      setTimeout(() => setSuccessMessage(''), 3000);
+      setVerifyingPickup(null);
+      setVerifyImages([]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploadingVerify(false);
+    }
+  };
+
   if (loading) {
     return <p className="text-sm text-muted">Loading requests...</p>;
   }
   if (error) {
     return <p className="text-sm text-red-600 dark:text-red-400">{error}</p>;
   }
-  if (pickups.length === 0) {
-    return (
-      <div className="p-10 card-modern text-center">
-        <Truck size={48} className="mx-auto text-muted opacity-40 mb-3" />
-        <p className="text-sm text-muted">No pickup requests yet.</p>
-      </div>
-    );
-  }
+  const filteredPickups = pickups.filter(p => {
+    if (filter === 'active') {
+      return ['submitted', 'pending_review', 'assigned', 'pending_citizen_verification', 'pending_admin_verification'].includes(p.status);
+    }
+    return ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status);
+  });
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-2xl font-extrabold text-primary">My Pickup Requests</h2>
-        <span className="text-sm text-muted">{pickups.length} total</span>
+      {successMessage && (
+        <div className="p-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg">
+          {successMessage}
+        </div>
+      )}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+        <div>
+          <h2 className="text-2xl font-extrabold text-primary">My Pickup Requests</h2>
+          <span className="text-sm text-muted">{pickups.length} total</span>
+        </div>
+        <div className="flex space-x-2">
+          <button 
+            onClick={() => setFilter('active')}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'active' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+          >
+            Active ({pickups.filter(p => ['submitted', 'pending_review', 'assigned', 'pending_citizen_verification', 'pending_admin_verification'].includes(p.status)).length})
+          </button>
+          <button 
+            onClick={() => setFilter('history')}
+            className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'history' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
+          >
+            History ({pickups.filter(p => ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status)).length})
+          </button>
+        </div>
       </div>
 
-      {pickups.map((p) => {
+      {filteredPickups.length === 0 ? (
+        <div className="p-10 card-modern text-center">
+          <Truck size={48} className="mx-auto text-muted opacity-40 mb-3" />
+          <p className="text-sm text-muted">No pickup requests found in this view.</p>
+        </div>
+      ) : filteredPickups.map((p) => {
         const statusInfo = STATUS_STYLES[p.status] || { cls: 'bg-gray-100 text-gray-700 border-gray-200', label: p.status };
         const collector = p.assigned_collector_detail;
         return (
@@ -61,10 +130,13 @@ export const CitizenRequests = () => {
             {/* Header row */}
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="font-bold text-primary text-base">
+                <div className="flex items-center gap-2">
+                <p className="font-bold text-[#0E1240] text-primary text-lg">
                   {p.category_detail?.category_name || 'Pickup Request'}
-                </h3>
-                <p className="text-sm text-muted mt-0.5">
+                </p>
+                {p.category_detail?.disposal_category === 'RECYCLABLE' && <RecyclableBadge />}
+              </div>
+              <p className="text-sm text-muted mt-1 font-medium">
                   {p.quantity} kg · Scheduled {p.pickup_date}
                 </p>
               </div>
@@ -125,9 +197,63 @@ export const CitizenRequests = () => {
                 Awaiting collector assignment by admin
               </div>
             )}
+            
+            {p.status === 'pending_citizen_verification' && (
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <button onClick={() => setVerifyingPickup(p)} className="w-full py-2 bg-eco-emerald text-white rounded-lg text-sm font-bold hover:bg-emerald-700 transition-colors">
+                  Verify Pickup Completion
+                </button>
+              </div>
+            )}
+
+            {p.images?.length > 0 && (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <div className="text-xs font-bold uppercase text-muted tracking-wider mb-2">Request Images</div>
+                <ImageGallery images={p.images} />
+              </div>
+            )}
           </div>
         );
       })}
+      
+      {/* Verification Modal */}
+      {verifyingPickup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-modern p-8 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold mb-2 text-primary font-display">Verify Pickup</h2>
+            <p className="text-sm text-secondary mb-6">The collector marked this pickup as complete. Please upload a photo of the cleared location to verify.</p>
+            <form onSubmit={handleVerifySubmit} className="flex flex-col gap-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Upload Verification Photo(s)</label>
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <UploadCloud className="w-8 h-8 text-muted mb-2" />
+                    <p className="text-sm text-secondary">Click to upload or drag & drop</p>
+                    <p className="text-xs text-muted mt-1">JPEG, PNG, WEBP</p>
+                  </div>
+                  <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setVerifyImages(Array.from(e.target.files))} />
+                </label>
+                {verifyImages.length > 0 && (
+                  <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
+                    {verifyImages.map((file, i) => (
+                      <div key={i} className="relative w-16 h-16 shrink-0 group">
+                        <img src={URL.createObjectURL(file)} alt="Preview" className="w-full h-full object-cover rounded-lg border border-gray-200" />
+                        <button type="button" onClick={() => setVerifyImages(verifyImages.filter((_, idx) => idx !== i))} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"><X size={12}/></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-3 pt-4 border-t border-gray-100">
+                <button type="button" onClick={() => setVerifyingPickup(null)} className="flex-1 py-2 text-secondary bg-gray-100 hover:bg-gray-200 font-bold rounded-xl transition-colors">Cancel</button>
+                <button type="submit" disabled={uploadingVerify || verifyImages.length === 0} className="flex-1 py-2 bg-[#C9742B] text-white hover:bg-[#b06323] font-bold rounded-xl shadow-md transition-colors disabled:opacity-50">
+                  {uploadingVerify ? 'Uploading...' : 'Verify Now'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

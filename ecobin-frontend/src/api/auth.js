@@ -59,13 +59,19 @@ export function getAccessToken() {
 export async function authFetch(path, options = {}) {
   const token = getAccessToken();
 
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...options.headers,
+  };
+
+  if (options.body instanceof FormData) {
+    delete headers['Content-Type'];
+  }
+
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
+    headers,
   });
 
   if (response.status === 401) {

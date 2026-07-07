@@ -15,8 +15,17 @@ export async function getCategories() {
 }
 
 export async function createPickupRequest(data) {
+  // If data is FormData, do not JSON.stringify it
+  const isFormData = data instanceof FormData;
   return authFetch('/pickups/', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: isFormData ? data : JSON.stringify(data),
+  });
+}
+
+export async function uploadCitizenProof(pickupId, formData) {
+  return authFetch(`/pickups/${pickupId}/citizen_verify/`, {
+    method: 'POST',
+    body: formData,
   });
 }

@@ -103,10 +103,15 @@ class Collector(models.Model):
 # --- 5. PICKUP REQUESTS MODEL ---
 class PickupRequest(models.Model):
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
+        ('pending_assignment', 'Pending Assignment'),
+        ('pending_review', 'Pending Admin Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
         ('assigned', 'Assigned'),
-        ('collected', 'Collected'),
-        ('recycled', 'Recycled'),
+        ('in_progress', 'In Progress'),
+        ('pending_verification', 'Pending Verification'),
+        ('completion_rejected', 'Completion Rejected'),
+        ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
     ]
 
@@ -117,14 +122,36 @@ class PickupRequest(models.Model):
     assigned_collector = models.ForeignKey(Collector, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_requests')
     quantity = models.FloatField()
     pickup_date = models.DateField()
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='pending_assignment')
     address = models.TextField(blank=True, null=True)
+    landmark = models.TextField(blank=True, null=True)
+    description = models.TextField(blank=True, null=True)
+    rejection_reason = models.TextField(blank=True, null=True)
+    collector_completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.CharField(max_length=50, blank=True, null=True)
+    completion_note = models.TextField(blank=True, null=True)
     latitude = models.FloatField(blank=True, null=True)
     longitude = models.FloatField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"Request {str(self.request_id)[:8]} - {self.status}"
+
+class PickupImage(models.Model):
+    IMAGE_TYPE_CHOICES = [
+        ('citizen_upload', 'Citizen Upload'),
+        ('collector_proof', 'Collector Proof Image'),
+        ('citizen_verification', 'Citizen Verification Image'),
+    ]
+    image_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    request = models.ForeignKey(PickupRequest, on_delete=models.CASCADE, related_name='images')
+    uploader = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    image = models.ImageField(upload_to='pickup_images/')
+    image_type = models.CharField(max_length=20, choices=IMAGE_TYPE_CHOICES)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.image_type} for {self.request.request_id}"
 
 
 # --- 6. COLLECTIONS MODEL ---

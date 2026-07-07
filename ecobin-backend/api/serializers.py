@@ -28,7 +28,7 @@ class CitizenRegistrationSerializer(serializers.ModelSerializer):
         return user
     
 
-from .models import PickupRequest, WasteCategory
+from .models import PickupRequest, WasteCategory, PickupImage
 
 class WasteCategorySerializer(serializers.ModelSerializer):
     class Meta:
@@ -52,6 +52,7 @@ class AssignedCollectorBriefSerializer(serializers.Serializer):
     phone = serializers.SerializerMethodField()
     availability = serializers.CharField()
     assigned_area = serializers.CharField()
+    active_assignment_count = serializers.SerializerMethodField()
 
     def get_full_name(self, obj):
         return obj.user.full_name if obj.user else ''
@@ -62,6 +63,27 @@ class AssignedCollectorBriefSerializer(serializers.Serializer):
     def get_phone(self, obj):
         return obj.user.phone if obj.user else ''
 
+    def get_active_assignment_count(self, obj):
+        # We count requests assigned to this collector that are 'assigned' or 'in_progress'
+        from .models import PickupRequest
+        return PickupRequest.objects.filter(
+            assigned_collector=obj,
+            status__in=['assigned', 'in_progress']
+        ).count()
+
+
+class PickupImageSerializer(serializers.ModelSerializer):
+    uploader_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PickupImage
+        fields = ['image_id', 'image', 'image_type', 'uploaded_at', 'uploader_name']
+
+    def get_uploader_name(self, obj):
+        if obj.uploader:
+            return obj.uploader.full_name
+        return None
+
 
 class PickupRequestSerializer(serializers.ModelSerializer):
     # Automatically tracks who is logged in without prompting for the user ID in the body
@@ -69,6 +91,7 @@ class PickupRequestSerializer(serializers.ModelSerializer):
     
     # Nested representation for viewing, but accept UUID write targets
     category_detail = WasteCategorySerializer(source='category', read_only=True)
+    images = PickupImageSerializer(many=True, read_only=True)
     
     # Rich citizen info so collectors/admins see who made the request
     user_detail = serializers.SerializerMethodField(read_only=True)
@@ -84,7 +107,9 @@ class PickupRequestSerializer(serializers.ModelSerializer):
             'request_id', 'user', 'user_detail', 'bin', 'category', 'category_detail',
             'assigned_collector', 'assigned_collector_detail',
             'quantity', 'pickup_date', 'status', 
-            'address', 'latitude', 'longitude', 'created_at'
+            'address', 'landmark', 'description', 'rejection_reason',
+            'latitude', 'longitude', 'created_at', 'images',
+            'collector_completed_at', 'completed_by', 'completion_note'
         ]
         read_only_fields = ['request_id', 'assigned_collector', 'status', 'created_at']
 

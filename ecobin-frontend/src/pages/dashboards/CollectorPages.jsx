@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { authFetch } from '../../api/auth';
-import { getAssignedPickups } from '../../api/Collector';
+import { getAssignedPickups, uploadCompletionProof } from '../../api/Collector';
 import { getNotifications } from '../../api/notifications';
 import { getMyProfile } from '../../api/Users';
+import { ImageGallery } from '../../components/ImageGallery';
 import { MapPin, Trash2, TrendingUp, Award, Box, Bell, User, Phone, RefreshCw } from 'lucide-react';
 
 const STATUS_STYLES = {
@@ -20,6 +21,10 @@ export const CollectorRequests = () => {
   const [filter, setFilter] = useState('active');
   const [refreshing, setRefreshing] = useState(false);
 
+  const [proofModal, setProofModal] = useState(null); // stores the pickup object
+  const [proofData, setProofData] = useState({ notes: '', weight: '', images: [] });
+  const [submittingProof, setSubmittingProof] = useState(false);
+
   const loadPickups = async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -36,15 +41,41 @@ export const CollectorRequests = () => {
 
   useEffect(() => {
     loadPickups();
-    // Auto-refresh every 30s for real-time updates
-    const interval = setInterval(() => loadPickups(true), 30000);
+    // Auto-refresh every 15s for real-time updates
+    const interval = setInterval(() => loadPickups(true), 15000);
     return () => clearInterval(interval);
   }, []);
 
   const filteredPickups = pickups.filter(p => {
-    if (filter === 'active') return ['pending', 'assigned'].includes(p.status);
-    return ['collected', 'recycled'].includes(p.status);
+    if (filter === 'active') return ['pending_assignment', 'assigned', 'in_progress'].includes(p.status);
+    return ['collected', 'recycled', 'pending_verification', 'completed'].includes(p.status);
   });
+
+  const handleProofSubmit = async (e) => {
+    e.preventDefault();
+    if (proofData.images.length === 0) {
+      setError('Please upload at least one photo as proof of collection.');
+      return;
+    }
+    setSubmittingProof(true);
+    setError('');
+    
+    try {
+      const formData = new FormData();
+      if (proofData.notes) formData.append('notes', proofData.notes);
+      if (proofData.weight) formData.append('weight', proofData.weight);
+      proofData.images.forEach(img => formData.append('images', img));
+      
+      await uploadCompletionProof(proofModal.request_id, formData);
+      setProofModal(null);
+      setProofData({ notes: '', weight: '', images: [] });
+      await loadPickups();
+    } catch (err) {
+      setError(err.message || 'Failed to upload proof. Please try again.');
+    } finally {
+      setSubmittingProof(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -65,7 +96,7 @@ export const CollectorRequests = () => {
               onClick={() => setFilter('completed')}
               className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'completed' ? 'bg-eco-forest text-white' : 'bg-gray-100 text-secondary dark:bg-gray-800 hover:bg-gray-200'}`}
             >
-              Completed ({pickups.filter(p => ['collected','recycled'].includes(p.status)).length})
+              Completed ({pickups.filter(p => ['collected', 'recycled', 'pending_verification', 'completed'].includes(p.status)).length})
             </button>
           </div>
           <button
@@ -123,17 +154,18 @@ export const CollectorRequests = () => {
               )}
 
               {/* Address + Map */}
-              {(pickup.address || (pickup.latitude && pickup.longitude)) && (
+              {(pickup.address || (pickup.latitude && pickup.longitude) || pickup.landmark) && (
                 <div className="mt-2 flex items-start gap-1.5 text-sm text-secondary">
                   <MapPin className="w-3.5 h-3.5 text-muted shrink-0 mt-0.5" />
                   <div>
                     {pickup.address && <span>{pickup.address}</span>}
+                    {pickup.landmark && <span className="italic ml-2">({pickup.landmark})</span>}
                     {pickup.latitude && pickup.longitude && (
                       <a
                         href={`https://www.google.com/maps?q=${pickup.latitude},${pickup.longitude}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="ml-2 text-xs font-medium text-[#387478] hover:underline"
+                        className="ml-2 text-xs font-medium text-[#387478] hover:underline block mt-1"
                       >
                         View on Map ↗
                       </a>
@@ -141,8 +173,111 @@ export const CollectorRequests = () => {
                   </div>
                 </div>
               )}
+              
+              {/* Display Uploaded Images */}
+              {pickup.images?.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="text-xs font-bold uppercase text-muted tracking-wider mb-2">Attached Images</div>
+                  <ImageGallery images={pickup.images} />
+                </div>
+              )}
+              
+              {/* Action Button */}
+              {pickup.status === 'assigned' && (
+                <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end">
+                  <button 
+                    onClick={() => setProofModal(pickup)}
+                    className="px-4 py-2 bg-[#387478] text-white text-sm font-bold rounded-lg hover:bg-[#2d5f62] transition-colors"
+                  >
+                    Log Collection & Upload Proof
+                  </button>
+                </div>
+              )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Proof Modal */}
+      {proofModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-modern p-8 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold mb-4 text-primary">Complete Pickup</h2>
+            <p className="text-sm text-secondary mb-6">Upload proof for {proofModal.category_detail?.category_name} pickup.</p>
+            
+            {error && <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm font-medium">{error}</div>}
+            
+            <form onSubmit={handleProofSubmit} className="flex flex-col gap-5">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Collected Weight (kg)</label>
+                <input 
+                  type="number" min="0" step="0.1" 
+                  value={proofData.weight} 
+                  onChange={e => setProofData({...proofData, weight: e.target.value})}
+                  className="input-modern"
+                  placeholder={proofModal.quantity.toString()}
+                />
+                <p className="text-xs text-muted mt-1">Leave blank to use original estimate ({proofModal.quantity}kg)</p>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Notes / Remarks</label>
+                <textarea 
+                  value={proofData.notes} 
+                  onChange={e => setProofData({...proofData, notes: e.target.value})}
+                  className="input-modern min-h-[80px]"
+                  placeholder="Any issues or details about the collection?"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Proof Photos (Required)</label>
+                <input 
+                  type="file" multiple accept="image/*"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files);
+                    setProofData(prev => ({ ...prev, images: [...prev.images, ...files] }));
+                  }}
+                  className="w-full text-sm border border-gray-200 rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-[#E2F1E7] file:text-[#387478] hover:file:bg-[#d0e6d8]"
+                />
+                
+                {proofData.images.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    {proofData.images.map((file, idx) => (
+                      <div key={idx} className="relative group rounded-lg overflow-hidden border border-gray-200 aspect-square">
+                        <img src={URL.createObjectURL(file)} alt="preview" className="w-full h-full object-cover" />
+                        <button 
+                          type="button"
+                          onClick={() => setProofData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }))}
+                          className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100 mt-2">
+                <button 
+                  type="button" 
+                  onClick={() => { setProofModal(null); setProofData({ notes: '', weight: '', images: [] }); setError(''); }}
+                  className="px-5 py-2.5 rounded-xl font-bold text-secondary bg-gray-100 hover:bg-gray-200 transition-colors"
+                  disabled={submittingProof}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-5 py-2.5 rounded-xl font-bold text-white bg-[#387478] hover:bg-[#2d5f62] shadow-md transition-colors disabled:opacity-50"
+                  disabled={submittingProof}
+                >
+                  {submittingProof ? 'Uploading...' : 'Submit Proof'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

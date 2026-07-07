@@ -110,7 +110,7 @@ export default function CollectorDashboard() {
   }
 
   const activePickups    = pickups.filter((p) => ['assigned', 'pending'].includes(p.status));
-  const completedPickups = pickups.filter((p) => ['collected', 'recycled'].includes(p.status));
+  const completedPickups = pickups.filter((p) => ['collected', 'recycled', 'pending_citizen_verification', 'pending_admin_verification', 'completed'].includes(p.status));
 
   return (
     <main className="max-w-5xl mx-auto px-6 py-16">
