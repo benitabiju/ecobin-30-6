@@ -130,6 +130,15 @@ class PickupRequestSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Quantity must be greater than 0 kg.")
         return value
 
+    def validate(self, attrs):
+        request = self.context.get('request')
+        if request and request.user and request.user.role == 'citizen':
+            # Check for existing active requests
+            active_statuses = ['pending_assignment', 'pending_review', 'assigned', 'in_progress', 'pending_verification', 'approved']
+            if PickupRequest.objects.filter(user=request.user, status__in=active_statuses).exists():
+                raise serializers.ValidationError("You already have an active pickup request. You must wait for it to be completed, cancelled, or deleted before submitting a new one.")
+        return attrs
+
 from .models import Collector
 
 class CollectorProfileSerializer(serializers.ModelSerializer):

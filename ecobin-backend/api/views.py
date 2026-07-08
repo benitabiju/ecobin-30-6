@@ -152,6 +152,31 @@ class PickupRequestViewSet(viewsets.ModelViewSet):
         if pickup.street:
             services.check_street_cleanup_trigger(pickup.street)
 
+    def destroy(self, request, *args, **kwargs):
+        pickup = self.get_object()
+        user = request.user
+        
+        if user.role == 'citizen':
+            if pickup.user != user:
+                return Response({"error": "Not authorized."}, status=status.HTTP_403_FORBIDDEN)
+            if pickup.status not in ['pending_assignment', 'pending_review']:
+                return Response({"error": "Cannot delete a request that is no longer pending."}, status=status.HTTP_400_BAD_REQUEST)
+                
+        elif user.role in ['admin', 'staff']:
+            reason = request.data.get('reason') or request.query_params.get('reason')
+            if not reason:
+                return Response({"error": "Admin must provide a reason for deletion. Pass it as a 'reason' query parameter or in the request body."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            Notification.objects.create(
+                user=pickup.user,
+                title="Pickup Request Deleted",
+                message=f"Your pickup request (ID: {str(pickup.request_id)[:8]}) was deleted by an admin. Reason: {reason}"
+            )
+        else:
+            return Response({"error": "Not authorized."}, status=status.HTTP_403_FORBIDDEN)
+            
+        return super().destroy(request, *args, **kwargs)
+
     # PATCH /api/v1/pickups/{id}/assign/
     @action(detail=True, methods=['patch'], permission_classes=[IsStaffOrAdmin])
     def assign(self, request, pk=None):
