@@ -7,6 +7,7 @@ import { getMyCompoundCleanups } from '../../api/cleanups';
 import { UploadCloud, X } from 'lucide-react';
 import { ImageGallery } from '../../components/ImageGallery';
 import RecyclableBadge from '../../components/RecyclableBadge';
+import { authFetch } from '../../api/auth';
 
 const STATUS_STYLES = {
   pending_assignment: { cls: 'bg-yellow-100 text-yellow-800 border-yellow-200', label: 'Pending Assignment' },
@@ -392,7 +393,7 @@ export const CitizenRequests = () => {
                 <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
                     <UploadCloud className="w-8 h-8 text-muted mb-2" />
-                    <p className="text-sm text-secondary">Click to upload or drag & drop</p>
+                    <p className="text-sm text-secondary">Click to upload or drag &amp; drop</p>
                     <p className="text-xs text-muted mt-1">JPEG, PNG, WEBP</p>
                   </div>
                   <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setVerifyImages(Array.from(e.target.files))} />
@@ -536,37 +537,47 @@ export const CitizenBins = () => (
  </div>
 );
 
+// SMELL-03: Replace mock recycling data with real API fetch
 export const CitizenRecycling = () => {
- const mockRecords = [
- { id: 1, recycling_center: 'GreenEarth Center', recycled_weight: 15.5, recycled_date: '2026-06-15' },
- { id: 2, recycling_center: 'City Recyclers', recycled_weight: 8.2, recycled_date: '2026-06-20' },
- { id: 3, recycling_center: 'Eco Hub', recycled_weight: 22.0, recycled_date: '2026-07-01' },
- ];
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
- return (
- <div className="p-8 card-modern">
- <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-4">Recycling History</h2>
- {mockRecords.length === 0 ? (
- <p className="text-center text-secondary">No recycling records found.</p>
- ) : (
- <ul className="space-y-3">
- {mockRecords.map(rec => (
- <li
- key={rec.id}
- className="p-5 card-modern flex justify-between items-center shadow-inner border-eco-sage/10"
- >
- <div>
- <p className="font-medium text-[#0E1240] text-primary">
- {rec.recycling_center} – {rec.recycled_weight} kg
- </p>
- <p className="text-sm text-muted">{rec.recycled_date}</p>
- </div>
- </li>
- ))}
- </ul>
- )}
- </div>
- );
+  useEffect(() => {
+    authFetch('/recycling/')
+      .then(data => setRecords(Array.isArray(data) ? data : data.results || []))
+      .catch(err => setError(err.message || 'Failed to load recycling history.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="p-8 card-modern">
+      <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-4">Recycling History</h2>
+      {loading ? (
+        <p className="text-sm text-muted">Loading recycling history…</p>
+      ) : error ? (
+        <p className="text-sm text-red-500">{error}</p>
+      ) : records.length === 0 ? (
+        <p className="text-center text-secondary">No recycling records found.</p>
+      ) : (
+        <ul className="space-y-3">
+          {records.map(rec => (
+            <li
+              key={rec.recycling_id}
+              className="p-5 card-modern flex justify-between items-center shadow-inner border-eco-sage/10"
+            >
+              <div>
+                <p className="font-medium text-[#0E1240] text-primary">
+                  {rec.recycling_center} – {rec.recycled_weight} kg
+                </p>
+                <p className="text-sm text-muted">{rec.recycled_date}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 };
 
 export const CitizenFeedback = () => {
@@ -684,7 +695,7 @@ export const CitizenProfile = () => {
 
  return (
  <div className="p-8 card-modern">
- <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-4">Profile & Settings</h2>
+ <h2 className="text-2xl font-bold text-[#0E1240] text-primary mb-4">Profile &amp; Settings</h2>
  <div className="flex items-center space-x-4 mb-6">
  <div className="w-16 h-16 rounded-full bg-eco-forest flex items-center justify-center text-white text-2xl font-bold hover:scale-105 transition-transform duration-300">
  {avatarInitials}

@@ -5,10 +5,16 @@ export async function getMyPickups() {
   return authFetch('/pickups/');
 }
 
-const API_BASE = 'http://127.0.0.1:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/v1` : 'http://127.0.0.1:8000/api/v1';
 
+// BUG-05 fix: added !response.ok guard so a backend error or network failure
+// produces a real thrown Error instead of silently returning an error object
+// or crashing on response.json(). Callers can now show a proper message.
 export async function getCategories() {
   const response = await fetch(`${API_BASE}/categories/`);
+  if (!response.ok) {
+    throw new Error('Failed to load waste categories. Please refresh and try again.');
+  }
   return response.json();
 }
 

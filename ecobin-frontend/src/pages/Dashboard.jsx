@@ -23,11 +23,19 @@ import RecyclableBadge from '../components/RecyclableBadge';
 import { ImageGallery } from '../components/ImageGallery';
 
 const STATUS_STYLES = {
+ pending_assignment: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+ pending_review: 'bg-amber-100 text-amber-800 border-amber-200',
+ approved: 'bg-sky-100 text-sky-800 border-sky-200',
+ assigned: 'bg-blue-100 text-blue-800 border-blue-200',
+ in_progress: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+ pending_verification: 'bg-orange-100 text-orange-800 border-orange-200',
+ completion_rejected: 'bg-red-100 text-red-800 border-red-200',
+ completed: 'bg-green-100 text-green-800 border-green-200',
+ cancelled: 'bg-gray-100 text-gray-600 border-gray-200',
+ rejected: 'bg-red-100 text-red-600 border-red-200',
  pending: 'bg-yellow-100 text-yellow-800',
- assigned: 'bg-blue-100 text-blue-800',
  collected: 'bg-purple-100 text-purple-800',
- recycled: 'bg-green-100 text-green-800',
- cancelled: 'bg-red-100 text-red-800',
+ recycled: 'bg-green-100 text-green-800'
 };
 
 export function CitizenDashboard() {
@@ -49,8 +57,8 @@ export function CitizenDashboard() {
     landmark: '',
     description: '',
     images: [],
-    latitude: 40.7128, // Default New York
-    longitude: -74.0060
+    latitude: null,  // BUG-06: was hardcoded to New York coords
+    longitude: null
   });
 
   const [verifyingPickup, setVerifyingPickup] = useState(null);
@@ -99,7 +107,7 @@ export function CitizenDashboard() {
            console.error("Geocoding failed", err);
         }
       }, () => {
-        // user denied or error, keep default
+        // user denied or error, keep null coords (user must click map)
       });
     }
   }, [showModal]);
@@ -171,7 +179,8 @@ export function CitizenDashboard() {
 
     await createPickupRequest(formData);
     setShowModal(false);
-    setNewRequest({ category: '', quantity: '', pickup_date: '', address: '', street: '', landmark: '', description: '', images: [], latitude: 40.7128, longitude: -74.0060 });
+    setError('');  // SMELL-02: clear error on modal close after submit
+    setNewRequest({ category: '', quantity: '', pickup_date: '', address: '', street: '', landmark: '', description: '', images: [], latitude: null, longitude: null });
  await loadPickups();
  // Show a success toast notification
  setSuccessMessage('Pickup request submitted successfully!');
@@ -213,9 +222,9 @@ export function CitizenDashboard() {
 
   const filteredPickups = pickups.filter(p => {
     if (filter === 'active') {
-      return ['pending_assignment', 'submitted', 'pending_review', 'assigned', 'in_progress', 'pending_verification'].includes(p.status);
+      return ['pending_assignment', 'submitted', 'pending_review', 'approved', 'assigned', 'in_progress', 'pending_verification', 'completion_rejected'].includes(p.status);
     }
-    return ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status);
+    return ['completed', 'cancelled', 'rejected', 'collected', 'recycled'].includes(p.status);
   });
 
  return (
@@ -225,7 +234,7 @@ export function CitizenDashboard() {
  Your dashboard
  </h1>
  <button 
- onClick={() => setShowModal(true)}
+ onClick={() => { setShowModal(true); setError(''); }}
  className="btn-primary"
  >
  + New Request
@@ -244,13 +253,13 @@ export function CitizenDashboard() {
  <div className="p-6 card-modern flex flex-col justify-center items-start">
  <span className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Active</span>
  <span className="text-4xl font-extrabold text-primary">
- {pickups.filter(p => ['pending', 'assigned'].includes(p.status)).length}
+ {pickups.filter(p => ['pending_assignment', 'submitted', 'pending_review', 'approved', 'assigned', 'in_progress', 'pending_verification'].includes(p.status)).length}
  </span>
  </div>
  <div className="p-6 card-modern flex flex-col justify-center items-start">
  <span className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Completed</span>
  <span className="text-4xl font-extrabold text-primary">
- {pickups.filter(p => ['collected', 'recycled'].includes(p.status)).length}
+ {pickups.filter(p => ['completed', 'collected', 'recycled'].includes(p.status)).length}
  </span>
  </div>
  </div>
@@ -273,17 +282,17 @@ export function CitizenDashboard() {
           onClick={() => setFilter('active')}
           className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'active' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
         >
-          Active ({pickups.filter(p => ['pending_assignment', 'submitted', 'pending_review', 'assigned', 'in_progress', 'pending_verification'].includes(p.status)).length})
+          Active ({pickups.filter(p => ['pending_assignment', 'submitted', 'pending_review', 'approved', 'assigned', 'in_progress', 'pending_verification', 'completion_rejected'].includes(p.status)).length})
         </button>
         <button 
           onClick={() => setFilter('history')}
           className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'history' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
         >
-          History ({pickups.filter(p => ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status)).length})
+          History ({pickups.filter(p => ['completed', 'cancelled', 'rejected', 'collected', 'recycled'].includes(p.status)).length})
         </button>
       </div>
       <button
-        onClick={() => setShowModal(true)}
+        onClick={() => { setShowModal(true); setError(''); }}
         className="btn-primary py-2 px-5 text-sm"
       >
         + New Request
@@ -385,7 +394,7 @@ export function CitizenDashboard() {
  <div>
  <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Quantity (kg)</label>
  <input 
- type="number" required min="0" step="0.1"
+ type="number" required min="0.1" step="0.1"
  value={newRequest.quantity}
  onChange={(e) => setNewRequest({...newRequest, quantity: e.target.value})}
  className="input-modern"
@@ -395,6 +404,7 @@ export function CitizenDashboard() {
  <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Pickup Date</label>
  <input 
  type="date" required
+ min={new Date().toISOString().split('T')[0]}
  value={newRequest.pickup_date}
  onChange={(e) => setNewRequest({...newRequest, pickup_date: e.target.value})}
  className="input-modern"
@@ -487,18 +497,25 @@ export function CitizenDashboard() {
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-secondary mb-2">Pinpoint Location on Map</label>
             <div className="h-64 rounded-xl overflow-hidden shadow-sm border border-gray-200 dark:border-gray-700 relative z-0">
-              <MapContainer 
-                center={[newRequest.latitude, newRequest.longitude]} 
-                zoom={14} 
-                style={{ height: '100%', width: '100%', zIndex: 0 }}
-              >
-                <TileLayer
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                />
-                <LeafletMarker position={[newRequest.latitude, newRequest.longitude]} />
-                <MapEvents onClick={onMapClick} />
-              </MapContainer>
+              {/* BUG-06: only render MapContainer when coords are available */}
+              {newRequest.latitude !== null ? (
+                <MapContainer 
+                  center={[newRequest.latitude, newRequest.longitude]} 
+                  zoom={14} 
+                  style={{ height: '100%', width: '100%', zIndex: 0 }}
+                >
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                  />
+                  <LeafletMarker position={[newRequest.latitude, newRequest.longitude]} />
+                  <MapEvents onClick={onMapClick} />
+                </MapContainer>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gray-50 dark:bg-gray-800">
+                  <p className="text-sm text-muted text-center py-8">📍 Waiting for your location…</p>
+                </div>
+              )}
             </div>
             <p className="text-xs text-muted mt-2">Click on the map to accurately place your pickup location pin.</p>
           </div>
@@ -507,7 +524,7 @@ export function CitizenDashboard() {
  <button type="submit" disabled={submitting} className="btn-primary flex-1">
  {submitting ? 'Submitting...' : 'Submit Request'}
  </button>
- <button type="button" onClick={() => setShowModal(false)} className="btn-secondary flex-1">
+ <button type="button" onClick={() => { setShowModal(false); setError(''); }} className="btn-secondary flex-1">
  Cancel
  </button>
  </div>
@@ -528,7 +545,7 @@ export function CitizenDashboard() {
                 <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer bg-gray-50 dark:bg-slate-800 hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors">
                   <div className="flex flex-col items-center justify-center pt-5 pb-6">
                     <UploadCloud className="w-8 h-8 text-muted mb-2" />
-                    <p className="text-sm text-secondary">Click to upload or drag & drop</p>
+                    <p className="text-sm text-secondary">Click to upload or drag &amp; drop</p>
                     <p className="text-xs text-muted mt-1">JPEG, PNG, WEBP</p>
                   </div>
                   <input type="file" multiple accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => setVerifyImages(Array.from(e.target.files))} />

@@ -1,13 +1,14 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import logo from '../assets/logo1.png';
 import {
  LayoutDashboard, FileText, Trash2, Star, MessageSquare,
- Bell, Settings, LogOut, Menu, X, ChevronLeft, ChevronRight, Leaf, Sparkles
+ Bell, Settings, LogOut, Menu, X, Sparkles
 } from "lucide-react";
 
 import { useState, useEffect } from "react";
 import { getMyProfile } from "../api/Users";
 import { getNotifications } from "../api/notifications";
+import { getMyPickups } from "../api/pickups"; // BUG-09 fix
 
 export default function CitizenLayout({ handleLogout, theme, toggleTheme }) {
  const [sidebarOpen, setSidebarOpen] = useState(false); // Mobile
@@ -15,29 +16,40 @@ export default function CitizenLayout({ handleLogout, theme, toggleTheme }) {
  const [profile, setProfile] = useState(null);
  const isDark = theme === 'dark';
  const [notifications, setNotifications] = useState([]);
+ const [showNotif, setShowNotif] = useState(false);
+ // BUG-09 fix: real pending-rating count drives the My Requests badge
+ const [pendingRatingCount, setPendingRatingCount] = useState(0);
 
  // Fetch notifications for badge count and dropdown
  useEffect(() => {
- getNotifications()
- .then(data => setNotifications(Array.isArray(data) ? data : data.results || []))
- .catch(err => console.error('Failed to fetch notifications', err));
+   getNotifications()
+     .then(data => setNotifications(Array.isArray(data) ? data : data.results || []))
+     .catch(err => console.error('Failed to fetch notifications', err));
+
+   // BUG-09 fix: derive badge from actual pickups that need a rating
+   getMyPickups()
+     .then(data => {
+       const all = Array.isArray(data) ? data : data.results || [];
+       setPendingRatingCount(all.filter(p => p.pending_rating).length);
+     })
+     .catch(() => {});
  }, []);
- const [showNotif, setShowNotif] = useState(false);
 
  useEffect(() => {
- getMyProfile().then(data => setProfile(data)).catch(err => console.error(err));
+   getMyProfile().then(data => setProfile(data)).catch(err => console.error(err));
  }, []);
 
  // Navigation items for the sidebar
  const navItems = [
- { to: "/citizen/dashboard", icon: LayoutDashboard, label: "Dashboard" },
- { to: "/citizen/requests", icon: FileText, label: "My Requests", badge: 2 },
- { to: "/citizen/cleanups", icon: Sparkles, label: "Compound Cleanups" },
- { to: "/citizen/bins", icon: Trash2, label: "Nearby Bins" },
- { to: "/citizen/recycling", icon: Star, label: "Recycling History" },
- { to: "/citizen/feedback", icon: MessageSquare, label: "Feedback" },
- { to: "/citizen/notifications", icon: Bell, label: "Notifications", badge: notifications.filter(n => !n.is_read).length },
- { to: "/citizen/profile", icon: Settings, label: "Profile & Settings" },
+   { to: "/citizen/dashboard",     icon: LayoutDashboard, label: "Dashboard" },
+   // BUG-09 fix: badge is now the count of pickups awaiting a rating (was hardcoded 2)
+   { to: "/citizen/requests",      icon: FileText,        label: "My Requests",      badge: pendingRatingCount || 0 },
+   { to: "/citizen/cleanups",      icon: Sparkles,        label: "Compound Cleanups" },
+   { to: "/citizen/bins",          icon: Trash2,          label: "Nearby Bins" },
+   { to: "/citizen/recycling",     icon: Star,            label: "Recycling History" },
+   { to: "/citizen/feedback",      icon: MessageSquare,   label: "Feedback" },
+   { to: "/citizen/notifications", icon: Bell,            label: "Notifications",    badge: notifications.filter(n => !n.is_read).length },
+   { to: "/citizen/profile",       icon: Settings,        label: "Profile & Settings" },
  ];
 
  return (
@@ -99,7 +111,7 @@ export default function CitizenLayout({ handleLogout, theme, toggleTheme }) {
  >
  <Icon size={20} className="shrink-0" />
  {!isCollapsed && <span className="flex-1 whitespace-nowrap">{label}</span>}
- {!isCollapsed && badge ? (
+ {!isCollapsed && badge > 0 ? (
  <span className="bg-[#C9742B] text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
  {badge}
  </span>

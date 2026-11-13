@@ -1,4 +1,4 @@
-const API_BASE = 'http://127.0.0.1:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL ? `${import.meta.env.VITE_API_URL}/api/v1` : 'http://127.0.0.1:8000/api/v1';
 
 export async function registerUser({ full_name, email, phone, address, password }) {
   const response = await fetch(`${API_BASE}/auth/register/`, {
@@ -10,8 +10,13 @@ export async function registerUser({ full_name, email, phone, address, password 
   const data = await response.json();
 
   if (!response.ok) {
+    // BUG-03 fix: handle nested DRF error objects and plain strings
     const firstError = Object.values(data)[0];
-    const message = Array.isArray(firstError) ? firstError[0] : 'Registration failed.';
+    const message = Array.isArray(firstError)
+      ? firstError[0]
+      : typeof firstError === 'string'
+      ? firstError
+      : data.detail || data.error || 'Registration failed.';
     throw new Error(message);
   }
 

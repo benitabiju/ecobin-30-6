@@ -612,7 +612,7 @@ export const AdminPickups = () => {
 
   const filteredPickups = pickups.filter(p => {
     if (filter === 'active') {
-      return ['pending_assignment', 'submitted', 'pending_review', 'assigned', 'in_progress', 'pending_verification'].includes(p.status);
+      return ['pending_assignment', 'submitted', 'pending_review', 'approved', 'assigned', 'in_progress', 'pending_verification'].includes(p.status);
     }
     return ['completed', 'cancelled', 'completion_rejected', 'collected', 'recycled'].includes(p.status);
   });
@@ -657,7 +657,7 @@ export const AdminPickups = () => {
           onClick={() => setFilter('active')}
           className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${filter === 'active' ? 'bg-[#387478] text-white' : 'bg-gray-100 text-secondary hover:bg-gray-200'}`}
         >
-          Active ({pickups.filter(p => ['submitted', 'pending_review', 'assigned', 'pending_verification'].includes(p.status)).length})
+          Active ({pickups.filter(p => ['pending_assignment', 'submitted', 'pending_review', 'approved', 'assigned', 'in_progress', 'pending_verification'].includes(p.status)).length})
         </button>
         <button 
           onClick={() => setFilter('completed')}

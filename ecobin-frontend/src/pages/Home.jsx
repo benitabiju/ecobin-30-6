@@ -224,10 +224,11 @@ export default function Home() {
  <p className="text-base text-secondary">Reach out to our team for a demo.</p>
  </div>
  <div className="p-12 md:w-7/12">
- <form className="flex flex-col gap-5">
+ {/* BUG-10 fix: added onSubmit handler to prevent native browser GET which wipes the React SPA */}
+ <form onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-5">
  <input className="input-modern" placeholder="Name" />
  <textarea className="input-modern" placeholder="Message" rows="4"></textarea>
- <button className="btn-primary self-start mt-2">Send message</button>
+ <button type="submit" className="btn-primary self-start mt-2">Send message</button>
  </form>
  </div>
  </div>
